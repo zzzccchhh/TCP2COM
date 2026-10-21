@@ -3,6 +3,7 @@ import socket
 import sys
 import threading
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from reset_control import FiveClickGate, ResetError, ResetOutcomeUnknown, perform_reset
@@ -66,9 +67,23 @@ class ProtocolTests(unittest.TestCase):
         conn.sendall(b"READY\n")
         line = bytearray()
         while not line.endswith(b"\n"):
-            line.extend(conn.recv(64))
+            block = conn.recv(64)
+            if not block:
+                raise EOFError("控制客户端在发送完整命令前断开")
+            line.extend(block)
         received.append(bytes(line))
         return line.decode().strip().split()[1]
+
+    def test_request_reader_stops_on_eof(self):
+        for prefix in (b"", b"RESET partial"):
+            with self.subTest(prefix=prefix):
+                conn = mock.Mock()
+                conn.recv.side_effect = [prefix, b""] if prefix else [b""]
+                received = []
+                with self.assertRaises(EOFError):
+                    self.request(conn, received)
+                self.assertEqual(received, [])
+                self.assertEqual(conn.recv.call_count, 2 if prefix else 1)
 
     def test_fragmented_greeting_coalesced_responses(self):
         def handler(conn, received):

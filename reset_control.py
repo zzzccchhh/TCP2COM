@@ -110,8 +110,6 @@ class ResetPanel:
         self.app = app
         self.root = tk.Tk()
         self.root.title("TCP ↔ COM · 远程复位")
-        self.root.geometry("560x300")
-        self.root.minsize(500, 280)
         self.gate = FiveClickGate()
         self.events = queue.Queue()
         self.cancel = threading.Event()
@@ -132,17 +130,33 @@ class ResetPanel:
         self.status = tk.StringVar(value="等待操作（0/5）")
         tk.Label(self.root, textvariable=self.status, wraplength=520,
                  fg="#374151").pack(padx=12, pady=10)
+        self._fit_contents()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
-        self.root.after(50, self.poll)
+        self.poll_job = self.root.after(50, self.poll)
+
+    def _fit_contents(self):
+        # 字体缩放和多行结果会改变所需高度，不能固定为 300px。
+        self.root.update_idletasks()
+        width = max(500, self.root.winfo_reqwidth())
+        height = max(280, self.root.winfo_reqheight())
+        self.root.minsize(width, height)
+        self.root.geometry(
+            f"{max(560, width, self.root.winfo_width())}x"
+            f"{max(300, height, self.root.winfo_height())}"
+        )
+
+    def _set_status(self, message):
+        self.status.set(message)
+        self._fit_contents()
 
     def click(self):
         if self.closed or self.app.close_event.is_set() or self.gate.busy:
             return
         if not self.gate.click(time.monotonic()):
-            self.status.set(f"已点击 {self.gate.count}/5（从首次点击起 3 秒内完成）")
+            self._set_status(f"已点击 {self.gate.count}/5（从首次点击起 3 秒内完成）")
             return
         self.button.configure(state=self.tk.DISABLED)
-        self.status.set("正在发送复位请求…")
+        self._set_status("正在发送复位请求…")
         self.worker = threading.Thread(target=self.request_reset, name="remote-reset", daemon=True)
         self.worker.start()
 
@@ -159,6 +173,7 @@ class ResetPanel:
         self.events.put((True, message))
 
     def poll(self):
+        self.poll_job = None
         if self.closed:
             return
         if self.app.close_event.is_set():
@@ -167,13 +182,13 @@ class ResetPanel:
         old_count = self.gate.count
         self.gate.expire(time.monotonic())
         if old_count and not self.gate.count:
-            self.status.set("点击超时，已清零（0/5）")
+            self._set_status("点击超时，已清零（0/5）")
         while True:
             try:
                 finished, message = self.events.get_nowait()
             except queue.Empty:
                 break
-            self.status.set(message)
+            self._set_status(message)
             if finished:
                 self.gate.finish()
                 self.button.configure(state=self.tk.NORMAL)
@@ -182,7 +197,7 @@ class ResetPanel:
             f"透传 {'已连接' if sock is not None else '未连接 / 重连中'}"
             f" · {self.app.args.com} · {self.app.args.baud} baud"
         )
-        self.root.after(50, self.poll)
+        self.poll_job = self.root.after(50, self.poll)
 
     def close(self):
         if self.closed:
@@ -191,6 +206,9 @@ class ResetPanel:
         self.cancel.set()
         self.app.close_event.set()
         self.app.conn.close_current("复位窗口关闭")
+        if self.poll_job is not None:
+            self.root.after_cancel(self.poll_job)
+            self.poll_job = None
         self.root.destroy()
 
     def run(self):

@@ -8,10 +8,60 @@ import threading
 import time
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import tcp2com
 from reset_control import ResetPanel
+
+
+class PanelLayoutTests(unittest.TestCase):
+    def test_scaled_fonts_and_multiline_status_are_not_clipped(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            self.skipTest("Tk unavailable")
+
+        for scaling in (1.333, 2.0):
+            with self.subTest(scaling=scaling):
+                try:
+                    root = tk.Tk()
+                except tk.TclError:
+                    self.skipTest("Tk display unavailable")
+                root.withdraw()
+                root.tk.call("tk", "scaling", scaling)
+                app = SimpleNamespace(
+                    args=SimpleNamespace(host="192.168.137.200", control_port=8081,
+                                         com="COM1", baud=1152000),
+                    close_event=threading.Event(),
+                    conn=SimpleNamespace(snapshot=lambda: (None, 0),
+                                         close_current=lambda reason: None),
+                )
+                panel = None
+                try:
+                    with mock.patch.object(tk, "Tk", return_value=root):
+                        panel = ResetPanel(app)
+                    # 在屏幕外进行真实布局，避免弹出可见测试窗口。
+                    root.geometry("+30000+30000")
+                    root.deiconify()
+                    for message in (
+                        "等待操作（0/5）",
+                        "复位结果未知：等待控制响应超时；不会自动重发，请检查设备状态",
+                        "复位完成：GPIO0 已释放，恢复正常状态灯",
+                    ):
+                        panel._set_status(message)
+                        root.update()
+                        label = root.winfo_children()[-1]
+                        self.assertTrue(label.winfo_ismapped())
+                        self.assertGreaterEqual(label.winfo_height(), label.winfo_reqheight())
+                        self.assertLessEqual(label.winfo_y() + label.winfo_height(),
+                                             root.winfo_height())
+                        self.assertGreaterEqual(root.winfo_height(), root.winfo_reqheight())
+                finally:
+                    if panel is not None:
+                        panel.close()
+                    else:
+                        root.destroy()
 
 
 class PanelIntegrationTests(unittest.TestCase):
