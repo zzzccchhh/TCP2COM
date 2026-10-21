@@ -27,7 +27,8 @@ import threading
 import time
 from typing import Optional, Tuple
 
-from reset_control import BridgeWindow
+from console_control import WindowsConsoleControl
+from reset_control import ConsoleResetController
 
 try:
     import serial
@@ -162,8 +163,64 @@ class ConsoleUI:
         self.last_state = None
         self.last_warn = {}
         self.last_rate_print = 0.0
+        self.reset_entry = None
+
+    def enable_reset_entry(self):
+        if not self.interactive:
+            self.message("当前输出不是交互式控制台，不显示急停入口；桥接继续运行")
+            return
+        with self.lock:
+            try:
+                self.reset_entry = WindowsConsoleControl()
+            except OSError as exc:
+                self.message(f"无法启用命令行急停入口：{exc}；桥接继续运行")
+            else:
+                self.message("点击底行的急停入口或按 R 打开复位窗口；Ctrl+C 退出桥接")
+
+    def disable_reset_entry(self):
+        with self.lock:
+            control, self.reset_entry = self.reset_entry, None
+            if control is not None:
+                try:
+                    control.clear_line()
+                except OSError:
+                    pass
+                try:
+                    control.close()
+                except OSError:
+                    pass
+
+    def _reset_entry_failed(self, exc):
+        self.disable_reset_entry()
+        self.message(f"命令行急停入口已停用：{exc}；桥接继续运行")
+
+    def poll_reset_entry(self):
+        with self.lock:
+            if self.reset_entry is None:
+                return False
+            try:
+                opened = False
+                for event in self.reset_entry.read_events():
+                    if self.reset_entry is None:
+                        break
+                    if event[0] == "resize":
+                        self._draw_rate_locked()
+                    elif event[0] == "open" or (
+                        event[0] == "click" and self.reset_entry.hit_test(*event[1:])
+                    ):
+                        opened = True
+                return opened
+            except OSError as exc:
+                self._reset_entry_failed(exc)
+                return False
 
     def _clear_current_line(self) -> None:
+        if self.reset_entry is not None:
+            try:
+                self.reset_entry.clear_line()
+                return
+            except OSError as exc:
+                self._reset_entry_failed(exc)
         if self.ansi:
             sys.stdout.write("\r\x1b[2K")
         elif self.interactive:
@@ -171,6 +228,12 @@ class ConsoleUI:
 
     def _draw_rate_locked(self) -> None:
         if self.interactive:
+            if self.reset_entry is not None:
+                try:
+                    self.reset_entry.render(self.rate_line)
+                    return
+                except OSError as exc:
+                    self._reset_entry_failed(exc)
             self._clear_current_line()
             sys.stdout.write(self.rate_line[:230])
             sys.stdout.flush()
@@ -740,7 +803,7 @@ def parse_args(argv=None):
     parser.add_argument("--host", help="TCP 服务端 IP 或主机名")
     parser.add_argument("--port", type=int, default=8080, help="TCP 服务端端口")
     parser.add_argument("--control-port", type=int, default=8081, help="ESP 独立复位控制端口")
-    parser.add_argument("--no-reset-ui", action="store_true", help="仅运行控制台桥接，不打开图形主窗口")
+    parser.add_argument("--no-reset-ui", action="store_true", help="关闭命令行急停入口及复位弹窗功能")
     parser.add_argument("--com", help="本地串口，例如 COM5")
     parser.add_argument("--list-coms", action="store_true", help="列出本机串口")
     parser.add_argument("--baud", type=int, default=1152000, help="串口波特率")
@@ -826,15 +889,15 @@ def main(argv=None):
             app.run()
         else:
             try:
-                window = BridgeWindow(app)
+                controller = ConsoleResetController(app)
             except Exception as exc:
-                ui.message(f"无法打开桥接主窗口：{exc}；需要纯控制台时请添加 --no-reset-ui")
-                app.exit_code = 1
+                ui.message(f"无法初始化复位弹窗：{exc}；继续运行控制台桥接")
+                app.run()
             else:
                 stats_thread = threading.Thread(target=app.run, name="stats", daemon=True)
                 app.threads.append(stats_thread)
                 stats_thread.start()
-                window.run()
+                controller.run()
     except KeyboardInterrupt:
         # Ctrl+C in terminals that do not deliver the registered signal
         # handler still results in a normal cleanup path.

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import tcp2com
-from reset_control import BridgeWindow, ResetOutcomeUnknown, ResetPanel
+from reset_control import ConsoleResetController, ResetOutcomeUnknown, ResetPanel
 
 
 class PanelLayoutTests(unittest.TestCase):
@@ -78,10 +78,10 @@ class WindowLifecycleTests(unittest.TestCase):
                                  com="COM1", baud=1152000),
             close_event=threading.Event(),
             conn=mock.Mock(snapshot=lambda: (None, 0)),
-            ui=mock.Mock(),
+            ui=mock.Mock(poll_reset_entry=mock.Mock(return_value=False)),
         )
         with mock.patch.object(tk, "Tk", return_value=self.root):
-            self.window = BridgeWindow(self.app)
+            self.window = ConsoleResetController(self.app)
         self.root.withdraw()
         self.root.geometry("+30000+30000")
 
@@ -91,13 +91,15 @@ class WindowLifecycleTests(unittest.TestCase):
             self.window.panel.worker.join(1)
 
     def open_panel(self):
-        self.window.open_button.invoke()
+        self.window.open_reset_panel()
         self.window.panel.root.geometry("+30000+30000")
         return self.window.panel
 
     def test_panel_is_lazy_reused_and_close_clears_partial_clicks(self):
         self.root.update()
         self.assertIsNone(self.window.panel)
+        self.assertEqual(self.root.state(), "withdrawn")
+        self.assertEqual(self.root.winfo_children(), [])
         self.assertFalse(any(child.winfo_class() == "Toplevel"
                              for child in self.root.winfo_children()))
         panel = self.open_panel()
@@ -159,7 +161,7 @@ class WindowLifecycleTests(unittest.TestCase):
         finally:
             release.set()
 
-    def test_main_close_and_external_shutdown_clean_up_hidden_panel(self):
+    def test_console_exit_cleans_up_hidden_panel_and_input(self):
         panel = self.open_panel()
         panel.close()
         self.app.close_event.set()  # Ctrl+C / bridge failure uses the same flag.
@@ -169,11 +171,12 @@ class WindowLifecycleTests(unittest.TestCase):
         self.assertTrue(panel.cancel.is_set())
         self.assertIsNone(self.window.poll_job)
         self.assertIsNone(panel.poll_job)
-        self.app.conn.close_current.assert_called_once()
+        self.app.ui.disable_reset_entry.assert_called_once()
+        self.app.conn.close_current.assert_not_called()
 
 
 class PanelIntegrationTests(unittest.TestCase):
-    def test_bridge_echo_reconnect_hidden_reset_and_main_shutdown(self):
+    def test_console_click_bridge_echo_reconnect_hidden_reset_and_shutdown(self):
         try:
             import tkinter as tk
             root = tk.Tk()
@@ -268,7 +271,9 @@ class PanelIntegrationTests(unittest.TestCase):
 
         case = self
 
-        class TestWindow(BridgeWindow):
+        from test_console_control import FakeConsole
+
+        class TestController(ConsoleResetController):
             def __init__(self, app):
                 super().__init__(app)
                 self.root.withdraw()
@@ -290,47 +295,56 @@ class PanelIntegrationTests(unittest.TestCase):
                     return
                 if echo_received.is_set() and self.stage == 0:
                     case.assertIsNone(self.panel)
-                    self.open_button.invoke()
+                    case.assertEqual(self.root.state(), "withdrawn")
+                    case.assertEqual(self.root.winfo_children(), [])
+                    self.app.ui.reset_entry.events.append(("click", 1, 0))
+                    self.stage = 1
+                if self.stage == 1 and self.panel is not None:
                     self.panel.close()
                     case.assertFalse(self.app.close_event.is_set())
                     continue_after_close.set()
-                    self.stage = 1
-                if closed_echo_received.is_set() and reconnected.is_set() and self.stage == 1:
+                    self.stage = 2
+                if closed_echo_received.is_set() and reconnected.is_set() and self.stage == 2:
+                    self.app.ui.reset_entry.events.append(("click", 1, 0))
+                    self.stage = 3
+                if self.stage == 3 and self.panel.root.state() != "withdrawn":
                     panel = self.panel
-                    self.open_button.invoke()
-                    case.assertIs(self.panel, panel)
                     for _ in range(5):
                         panel.button.invoke()
                     case.assertTrue(panel.gate.busy)
                     case.assertEqual(str(panel.button["state"]), "disabled")
-                    self.stage = 2
-                if reset_started.is_set() and self.stage == 2:
+                    self.stage = 4
+                if reset_started.is_set() and self.stage == 4:
                     panel = self.panel
                     panel.close()
                     case.assertFalse(panel.cancel.is_set())
-                    self.open_button.invoke()
+                    self.open_reset_panel()
                     case.assertTrue(panel.gate.busy)
                     panel.button.invoke()  # Hidden/reopened request must not repeat.
                     panel.close()
                     finish_reset.set()
-                    self.stage = 3
-                if self.stage == 3 and not self.panel.gate.busy:
+                    self.stage = 5
+                if self.stage == 5 and not self.panel.gate.busy:
                     case.assertIn("复位完成", self.panel.status.get())
                     case.assertEqual(self.panel.root.state(), "withdrawn")
-                    self.open_button.invoke()
+                    self.open_reset_panel()
                     case.assertIn("复位完成", self.panel.status.get())
                     self.panel.close()
                     continue_after_reset.set()
-                    self.stage = 4
-                if self.stage == 4 and final_echo_received.is_set():
+                    self.stage = 6
+                if self.stage == 6 and final_echo_received.is_set():
                     self.finished = True
-                    self.root.tk.call(self.root.protocol("WM_DELETE_WINDOW"))
+                    self.app.close_event.set()  # Same path as console Ctrl+C.
                     return
                 self.root.after(20, self.drive)
 
         try:
-            with mock.patch.object(tcp2com, "BridgeWindow", TestWindow), \
-                    contextlib.redirect_stdout(io.StringIO()):
+            output = io.StringIO()
+            output.isatty = lambda: True
+            with mock.patch.object(tcp2com, "ConsoleResetController", TestController), \
+                    mock.patch.object(tcp2com, "WindowsConsoleControl", FakeConsole), \
+                    mock.patch.object(tcp2com, "enable_windows_vt", return_value=False), \
+                    contextlib.redirect_stdout(output):
                 result = tcp2com.main([
                     "--host", "127.0.0.1", "--port", str(bridge_port),
                     "--control-port", str(control_port), "--com", "loop://",

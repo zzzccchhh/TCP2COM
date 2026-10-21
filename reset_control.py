@@ -101,29 +101,19 @@ def perform_reset(host, port, progress, cancel, timeout=5.0):
         raise ResetError(f"复位未发送：{exc}；请检查控制端口及固件支持") from exc
 
 
-class BridgeWindow:
-    """主窗口管理桥接生命周期，复位面板按需创建并复用。"""
+class ConsoleResetController:
+    """隐藏的 Tk 根窗口只处理命令行打开请求和复位弹窗。"""
 
     def __init__(self, app):
         import tkinter as tk
 
         self.app = app
         self.root = tk.Tk()
-        self.root.title("TCP ↔ COM · 桥接")
+        self.root.withdraw()
         self.panel = None
         self.closed = False
-        tk.Label(self.root, text=f"{app.args.host}:{app.args.port} ↔ {app.args.com}",
-                 font=("Microsoft YaHei UI", 11)).pack(padx=20, pady=(16, 8))
-        self.bridge_state = tk.StringVar(master=self.root, value="桥接连接中…")
-        tk.Label(self.root, textvariable=self.bridge_state).pack(padx=20)
-        self.open_button = tk.Button(self.root, text="打开急停 / 复位面板",
-                                     command=self.open_reset_panel)
-        self.open_button.pack(padx=20, pady=14)
-        tk.Label(self.root, text="关闭急停面板不影响桥接；关闭此主窗口退出程序。").pack(
-            padx=20, pady=(0, 16)
-        )
-        self.root.protocol("WM_DELETE_WINDOW", self.close)
-        self.poll_job = self.root.after(100, self.poll)
+        self.app.ui.enable_reset_entry()
+        self.poll_job = self.root.after(50, self.poll)
 
     def open_reset_panel(self):
         if self.closed or self.app.close_event.is_set():
@@ -139,19 +129,15 @@ class BridgeWindow:
         if self.app.close_event.is_set():
             self.close()
             return
-        sock, _ = self.app.conn.snapshot()
-        self.bridge_state.set(
-            f"透传 {'已连接' if sock is not None else '未连接 / 重连中'}"
-            f" · {self.app.args.baud} baud"
-        )
-        self.poll_job = self.root.after(100, self.poll)
+        if self.app.ui.poll_reset_entry():
+            self.open_reset_panel()
+        self.poll_job = self.root.after(50, self.poll)
 
     def close(self):
         if self.closed:
             return
         self.closed = True
-        self.app.close_event.set()
-        self.app.conn.close_current("桥接主窗口关闭")
+        self.app.ui.disable_reset_entry()
         if self.poll_job is not None:
             self.root.after_cancel(self.poll_job)
             self.poll_job = None
