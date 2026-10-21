@@ -27,7 +27,7 @@ import threading
 import time
 from typing import Optional, Tuple
 
-from reset_control import ResetPanel
+from reset_control import BridgeWindow
 
 try:
     import serial
@@ -740,7 +740,7 @@ def parse_args(argv=None):
     parser.add_argument("--host", help="TCP 服务端 IP 或主机名")
     parser.add_argument("--port", type=int, default=8080, help="TCP 服务端端口")
     parser.add_argument("--control-port", type=int, default=8081, help="ESP 独立复位控制端口")
-    parser.add_argument("--no-reset-ui", action="store_true", help="仅运行控制台桥接，不打开复位按钮窗口")
+    parser.add_argument("--no-reset-ui", action="store_true", help="仅运行控制台桥接，不打开图形主窗口")
     parser.add_argument("--com", help="本地串口，例如 COM5")
     parser.add_argument("--list-coms", action="store_true", help="列出本机串口")
     parser.add_argument("--baud", type=int, default=1152000, help="串口波特率")
@@ -826,15 +826,15 @@ def main(argv=None):
             app.run()
         else:
             try:
-                panel = ResetPanel(app)
+                window = BridgeWindow(app)
             except Exception as exc:
-                ui.message(f"无法打开复位窗口：{exc}；需要纯控制台时请添加 --no-reset-ui")
+                ui.message(f"无法打开桥接主窗口：{exc}；需要纯控制台时请添加 --no-reset-ui")
                 app.exit_code = 1
             else:
                 stats_thread = threading.Thread(target=app.run, name="stats", daemon=True)
                 app.threads.append(stats_thread)
                 stats_thread.start()
-                panel.run()
+                window.run()
     except KeyboardInterrupt:
         # Ctrl+C in terminals that do not deliver the registered signal
         # handler still results in a normal cleanup path.

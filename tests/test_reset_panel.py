@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import tcp2com
-from reset_control import ResetPanel
+from reset_control import BridgeWindow, ResetOutcomeUnknown, ResetPanel
 
 
 class PanelLayoutTests(unittest.TestCase):
@@ -39,11 +39,10 @@ class PanelLayoutTests(unittest.TestCase):
                 )
                 panel = None
                 try:
-                    with mock.patch.object(tk, "Tk", return_value=root):
-                        panel = ResetPanel(app)
+                    panel = ResetPanel(app, root)
                     # 在屏幕外进行真实布局，避免弹出可见测试窗口。
-                    root.geometry("+30000+30000")
-                    root.deiconify()
+                    panel.root.geometry("+30000+30000")
+                    panel.show()
                     for message in (
                         "等待操作（0/5）",
                         "复位结果未知：等待控制响应超时；不会自动重发，请检查设备状态",
@@ -51,21 +50,130 @@ class PanelLayoutTests(unittest.TestCase):
                     ):
                         panel._set_status(message)
                         root.update()
-                        label = root.winfo_children()[-1]
+                        label = panel.root.winfo_children()[-1]
                         self.assertTrue(label.winfo_ismapped())
                         self.assertGreaterEqual(label.winfo_height(), label.winfo_reqheight())
                         self.assertLessEqual(label.winfo_y() + label.winfo_height(),
-                                             root.winfo_height())
-                        self.assertGreaterEqual(root.winfo_height(), root.winfo_reqheight())
+                                             panel.root.winfo_height())
+                        self.assertGreaterEqual(panel.root.winfo_height(),
+                                                panel.root.winfo_reqheight())
                 finally:
                     if panel is not None:
-                        panel.close()
-                    else:
-                        root.destroy()
+                        panel.shutdown()
+                    root.destroy()
+
+
+class WindowLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        try:
+            import tkinter as tk
+            self.root = tk.Tk()
+        except ImportError:
+            self.skipTest("Tk unavailable")
+        except tk.TclError:
+            self.skipTest("Tk display unavailable")
+        self.root.withdraw()
+        self.app = SimpleNamespace(
+            args=SimpleNamespace(host="127.0.0.1", port=8080, control_port=8081,
+                                 com="COM1", baud=1152000),
+            close_event=threading.Event(),
+            conn=mock.Mock(snapshot=lambda: (None, 0)),
+            ui=mock.Mock(),
+        )
+        with mock.patch.object(tk, "Tk", return_value=self.root):
+            self.window = BridgeWindow(self.app)
+        self.root.withdraw()
+        self.root.geometry("+30000+30000")
+
+    def tearDown(self):
+        self.window.close()
+        if self.window.panel is not None and self.window.panel.worker is not None:
+            self.window.panel.worker.join(1)
+
+    def open_panel(self):
+        self.window.open_button.invoke()
+        self.window.panel.root.geometry("+30000+30000")
+        return self.window.panel
+
+    def test_panel_is_lazy_reused_and_close_clears_partial_clicks(self):
+        self.root.update()
+        self.assertIsNone(self.window.panel)
+        self.assertFalse(any(child.winfo_class() == "Toplevel"
+                             for child in self.root.winfo_children()))
+        panel = self.open_panel()
+        for _ in range(4):
+            panel.button.invoke()
+        self.assertEqual(panel.gate.count, 4)
+        # Exercise the same callback as the title-bar close button.
+        panel.root.tk.call(panel.root.protocol("WM_DELETE_WINDOW"))
+        self.assertEqual(panel.root.state(), "withdrawn")
+        self.assertEqual(panel.gate.count, 0)
+        self.assertFalse(self.app.close_event.is_set())
+        self.app.conn.close_current.assert_not_called()
+        self.assertIs(self.open_panel(), panel)
+        self.assertIs(self.open_panel(), panel)
+        panel.button.invoke()
+        self.assertEqual(panel.gate.count, 1)
+        self.assertIsNone(panel.worker)
+        self.assertEqual(sum(child.winfo_class() == "Toplevel"
+                             for child in self.root.winfo_children()), 1)
+
+    def test_hidden_reset_keeps_waiting_and_preserves_unknown_result(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        def reset(_host, _port, progress, cancel):
+            progress("ESP 已开始复位")
+            started.set()
+            if not release.wait(2):
+                raise AssertionError("Test did not release reset worker")
+            self.assertFalse(cancel.is_set())
+            raise ResetOutcomeUnknown("复位结果未知：控制连接已断开")
+
+        panel = self.open_panel()
+        try:
+            with mock.patch("reset_control.perform_reset", side_effect=reset) as request:
+                for _ in range(5):
+                    panel.button.invoke()
+                self.assertTrue(started.wait(1))
+                panel.close()
+                self.assertFalse(panel.cancel.is_set())
+                self.assertTrue(panel.gate.busy)
+                self.assertIs(self.open_panel(), panel)
+                panel.button.invoke()
+                self.assertEqual(request.call_count, 1)
+                panel.close()
+                release.set()
+                panel.worker.join(1)
+                self.assertFalse(panel.worker.is_alive())
+                time.sleep(.06)
+                self.root.update()
+                self.assertFalse(panel.gate.busy)
+                self.assertIn("结果未知", panel.status.get())
+                self.assertEqual(panel.root.state(), "withdrawn")
+                self.assertIs(self.open_panel(), panel)
+                self.assertIn("结果未知", panel.status.get())
+                self.assertEqual(request.call_count, 1)
+                self.assertFalse(self.app.close_event.is_set())
+                self.app.conn.close_current.assert_not_called()
+        finally:
+            release.set()
+
+    def test_main_close_and_external_shutdown_clean_up_hidden_panel(self):
+        panel = self.open_panel()
+        panel.close()
+        self.app.close_event.set()  # Ctrl+C / bridge failure uses the same flag.
+        self.window.run()
+        self.assertTrue(self.window.closed)
+        self.assertTrue(panel.closed)
+        self.assertTrue(panel.cancel.is_set())
+        self.assertIsNone(self.window.poll_job)
+        self.assertIsNone(panel.poll_job)
+        self.app.conn.close_current.assert_called_once()
 
 
 class PanelIntegrationTests(unittest.TestCase):
-    def test_bridge_binary_echo_button_and_shutdown(self):
+    def test_bridge_echo_reconnect_hidden_reset_and_main_shutdown(self):
         try:
             import tkinter as tk
             root = tk.Tk()
@@ -78,13 +186,20 @@ class PanelIntegrationTests(unittest.TestCase):
 
         payload = bytes(range(256)) * 16
         echo_received = threading.Event()
+        continue_after_close = threading.Event()
+        closed_echo_received = threading.Event()
+        reconnected = threading.Event()
+        continue_after_reset = threading.Event()
+        final_echo_received = threading.Event()
+        reset_started = threading.Event()
+        finish_reset = threading.Event()
         failures = []
         requests = []
-        panels = []
+        windows = []
         servers = []
         workers = []
 
-        def listen(handler):
+        def listen(handler, connections=1):
             listener = socket.socket()
             listener.bind(("127.0.0.1", 0))
             listener.listen(1)
@@ -94,10 +209,11 @@ class PanelIntegrationTests(unittest.TestCase):
             def serve():
                 try:
                     with listener:
-                        conn, _ = listener.accept()
-                        with conn:
-                            conn.settimeout(8)
-                            handler(conn)
+                        for index in range(connections):
+                            conn, _ = listener.accept()
+                            with conn:
+                                conn.settimeout(8)
+                                handler(conn, index)
                 except BaseException as exc:
                     failures.append(exc)
             worker = threading.Thread(target=serve, daemon=True)
@@ -105,7 +221,7 @@ class PanelIntegrationTests(unittest.TestCase):
             worker.start()
             return listener.getsockname()[1]
 
-        def bridge(conn):
+        def echo(conn):
             conn.sendall(payload)
             echoed = bytearray()
             while len(echoed) < len(payload):
@@ -114,10 +230,24 @@ class PanelIntegrationTests(unittest.TestCase):
                     break
                 echoed.extend(block)
             self.assertEqual(bytes(echoed), payload)
-            echo_received.set()
-            self.assertEqual(conn.recv(1), b"")
 
-        def control(conn):
+        def bridge(conn, index):
+            echo(conn)
+            if index == 0:
+                echo_received.set()
+                self.assertTrue(continue_after_close.wait(6))
+                echo(conn)
+                closed_echo_received.set()
+                # Force a reconnect after proving that closing the panel kept
+                # the original payload socket alive.
+            else:
+                reconnected.set()
+                self.assertTrue(continue_after_reset.wait(6))
+                echo(conn)
+                final_echo_received.set()
+                self.assertEqual(conn.recv(1), b"")
+
+        def control(conn, _index):
             conn.sendall(b"ESP01S-RESET/1 READY\n")
             request = bytearray()
             while not request.endswith(b"\n"):
@@ -128,20 +258,23 @@ class PanelIntegrationTests(unittest.TestCase):
             requests.append(bytes(request))
             request_id = request.decode().strip().split()[1]
             conn.sendall(f"STARTED {request_id}\n".encode())
-            time.sleep(.1)
+            reset_started.set()
+            self.assertTrue(finish_reset.wait(6))
             conn.sendall(f"DONE {request_id}\n".encode())
             self.assertEqual(conn.recv(1), b"")
 
-        bridge_port = listen(bridge)
+        bridge_port = listen(bridge, connections=2)
         control_port = listen(control)
 
-        class TestPanel(ResetPanel):
+        case = self
+
+        class TestWindow(BridgeWindow):
             def __init__(self, app):
                 super().__init__(app)
                 self.root.withdraw()
-                panels.append(self)
+                windows.append(self)
                 self.deadline = time.monotonic() + 6
-                self.clicked = False
+                self.stage = 0
                 self.finished = False
                 self.root.report_callback_exception = self.callback_failed
                 self.root.after(20, self.drive)
@@ -155,31 +288,60 @@ class PanelIntegrationTests(unittest.TestCase):
                     failures.append(AssertionError("GUI completion timed out"))
                     self.close()
                     return
-                if echo_received.is_set() and not self.clicked:
+                if echo_received.is_set() and self.stage == 0:
+                    case.assertIsNone(self.panel)
+                    self.open_button.invoke()
+                    self.panel.close()
+                    case.assertFalse(self.app.close_event.is_set())
+                    continue_after_close.set()
+                    self.stage = 1
+                if closed_echo_received.is_set() and reconnected.is_set() and self.stage == 1:
+                    panel = self.panel
+                    self.open_button.invoke()
+                    case.assertIs(self.panel, panel)
                     for _ in range(5):
-                        self.button.invoke()
-                    self.clicked = True
-                    assert self.gate.busy
-                    assert str(self.button["state"]) == "disabled"
-                    self.button.invoke()  # Disabled button must not send a second request.
-                if self.clicked and not self.gate.busy:
+                        panel.button.invoke()
+                    case.assertTrue(panel.gate.busy)
+                    case.assertEqual(str(panel.button["state"]), "disabled")
+                    self.stage = 2
+                if reset_started.is_set() and self.stage == 2:
+                    panel = self.panel
+                    panel.close()
+                    case.assertFalse(panel.cancel.is_set())
+                    self.open_button.invoke()
+                    case.assertTrue(panel.gate.busy)
+                    panel.button.invoke()  # Hidden/reopened request must not repeat.
+                    panel.close()
+                    finish_reset.set()
+                    self.stage = 3
+                if self.stage == 3 and not self.panel.gate.busy:
+                    case.assertIn("复位完成", self.panel.status.get())
+                    case.assertEqual(self.panel.root.state(), "withdrawn")
+                    self.open_button.invoke()
+                    case.assertIn("复位完成", self.panel.status.get())
+                    self.panel.close()
+                    continue_after_reset.set()
+                    self.stage = 4
+                if self.stage == 4 and final_echo_received.is_set():
                     self.finished = True
-                    assert "复位完成" in self.status.get()
-                    self.close()
+                    self.root.tk.call(self.root.protocol("WM_DELETE_WINDOW"))
                     return
                 self.root.after(20, self.drive)
 
         try:
-            with mock.patch.object(tcp2com, "ResetPanel", TestPanel), \
+            with mock.patch.object(tcp2com, "BridgeWindow", TestWindow), \
                     contextlib.redirect_stdout(io.StringIO()):
                 result = tcp2com.main([
                     "--host", "127.0.0.1", "--port", str(bridge_port),
                     "--control-port", str(control_port), "--com", "loop://",
-                    "--keepalive-idle", "0",
+                    "--keepalive-idle", "0", "--reconnect", ".1",
                 ])
         finally:
-            for panel in panels:
-                panel.close()
+            finish_reset.set()
+            continue_after_close.set()
+            continue_after_reset.set()
+            for window in windows:
+                window.close()
             for listener in servers:
                 listener.close()
             for worker in workers:
@@ -187,10 +349,15 @@ class PanelIntegrationTests(unittest.TestCase):
         if failures:
             raise failures[0]
         self.assertEqual(result, 0)
-        self.assertTrue(panels[0].finished)
+        self.assertTrue(windows[0].finished)
         self.assertEqual(len(requests), 1)
         self.assertTrue(echo_received.is_set())
-        self.assertTrue(all(not worker.is_alive() for worker in panels[0].app.threads))
+        self.assertTrue(closed_echo_received.is_set())
+        self.assertTrue(reconnected.is_set())
+        self.assertTrue(final_echo_received.is_set())
+        self.assertTrue(windows[0].panel.closed)
+        self.assertFalse(windows[0].panel.worker.is_alive())
+        self.assertTrue(all(not worker.is_alive() for worker in windows[0].app.threads))
 
 
 if __name__ == "__main__":

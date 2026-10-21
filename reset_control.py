@@ -101,14 +101,82 @@ def perform_reset(host, port, progress, cancel, timeout=5.0):
         raise ResetError(f"复位未发送：{exc}；请检查控制端口及固件支持") from exc
 
 
-class ResetPanel:
+class BridgeWindow:
+    """主窗口管理桥接生命周期，复位面板按需创建并复用。"""
+
     def __init__(self, app):
+        import tkinter as tk
+
+        self.app = app
+        self.root = tk.Tk()
+        self.root.title("TCP ↔ COM · 桥接")
+        self.panel = None
+        self.closed = False
+        tk.Label(self.root, text=f"{app.args.host}:{app.args.port} ↔ {app.args.com}",
+                 font=("Microsoft YaHei UI", 11)).pack(padx=20, pady=(16, 8))
+        self.bridge_state = tk.StringVar(master=self.root, value="桥接连接中…")
+        tk.Label(self.root, textvariable=self.bridge_state).pack(padx=20)
+        self.open_button = tk.Button(self.root, text="打开急停 / 复位面板",
+                                     command=self.open_reset_panel)
+        self.open_button.pack(padx=20, pady=14)
+        tk.Label(self.root, text="关闭急停面板不影响桥接；关闭此主窗口退出程序。").pack(
+            padx=20, pady=(0, 16)
+        )
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.poll_job = self.root.after(100, self.poll)
+
+    def open_reset_panel(self):
+        if self.closed or self.app.close_event.is_set():
+            return
+        if self.panel is None:
+            self.panel = ResetPanel(self.app, self.root)
+        self.panel.show()
+
+    def poll(self):
+        self.poll_job = None
+        if self.closed:
+            return
+        if self.app.close_event.is_set():
+            self.close()
+            return
+        sock, _ = self.app.conn.snapshot()
+        self.bridge_state.set(
+            f"透传 {'已连接' if sock is not None else '未连接 / 重连中'}"
+            f" · {self.app.args.baud} baud"
+        )
+        self.poll_job = self.root.after(100, self.poll)
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        self.app.close_event.set()
+        self.app.conn.close_current("桥接主窗口关闭")
+        if self.poll_job is not None:
+            self.root.after_cancel(self.poll_job)
+            self.poll_job = None
+        if self.panel is not None:
+            self.panel.shutdown()
+        self.root.destroy()
+
+    def run(self):
+        try:
+            self.root.mainloop()
+        finally:
+            self.close()
+            if self.panel is not None and self.panel.worker is not None:
+                self.panel.worker.join(timeout=0.5)
+
+
+class ResetPanel:
+    def __init__(self, app, parent):
         # Tk 在主线程创建和更新；网络线程只写事件队列。
         import tkinter as tk
 
         self.tk = tk
         self.app = app
-        self.root = tk.Tk()
+        self.root = tk.Toplevel(parent)
+        self.root.withdraw()
         self.root.title("TCP ↔ COM · 远程复位")
         self.gate = FiveClickGate()
         self.events = queue.Queue()
@@ -117,7 +185,7 @@ class ResetPanel:
         self.closed = False
         tk.Label(self.root, text=f"{app.args.host}:{app.args.control_port} → 外部单片机复位",
                  font=("Microsoft YaHei UI", 11)).pack(pady=(14, 6))
-        self.bridge_state = tk.StringVar(value="桥接连接中…")
+        self.bridge_state = tk.StringVar(master=self.root, value="桥接连接中…")
         tk.Label(self.root, textvariable=self.bridge_state).pack()
         self.button = tk.Button(
             self.root, text="急停 / 复位", command=self.click,
@@ -127,7 +195,7 @@ class ResetPanel:
         )
         self.button.pack(pady=10)
         tk.Label(self.root, text="3 秒内点击 5 次触发 · GPIO0 拉低 1 秒后释放").pack()
-        self.status = tk.StringVar(value="等待操作（0/5）")
+        self.status = tk.StringVar(master=self.root, value="等待操作（0/5）")
         tk.Label(self.root, textvariable=self.status, wraplength=520,
                  fg="#374151").pack(padx=12, pady=10)
         self._fit_contents()
@@ -148,6 +216,13 @@ class ResetPanel:
     def _set_status(self, message):
         self.status.set(message)
         self._fit_contents()
+
+    def show(self):
+        if self.closed:
+            return
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_set()
 
     def click(self):
         if self.closed or self.app.close_event.is_set() or self.gate.busy:
@@ -177,7 +252,7 @@ class ResetPanel:
         if self.closed:
             return
         if self.app.close_event.is_set():
-            self.close()
+            self.shutdown()
             return
         old_count = self.gate.count
         self.gate.expire(time.monotonic())
@@ -200,21 +275,21 @@ class ResetPanel:
         self.poll_job = self.root.after(50, self.poll)
 
     def close(self):
+        """仅隐藏面板；已发送的请求继续执行并保留结果。"""
+        if self.closed:
+            return
+        self.root.withdraw()
+        if not self.gate.busy and self.gate.count:
+            self.gate.finish()
+            self._set_status("等待操作（0/5）")
+
+    def shutdown(self):
+        """整个程序退出时才取消控制等待并销毁面板。"""
         if self.closed:
             return
         self.closed = True
         self.cancel.set()
-        self.app.close_event.set()
-        self.app.conn.close_current("复位窗口关闭")
         if self.poll_job is not None:
             self.root.after_cancel(self.poll_job)
             self.poll_job = None
         self.root.destroy()
-
-    def run(self):
-        try:
-            self.root.mainloop()
-        finally:
-            self.close()
-            if self.worker is not None:
-                self.worker.join(timeout=0.5)
