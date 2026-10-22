@@ -1,0 +1,342 @@
+"""Real Tk lifecycle plus profile and bridge controller regression tests."""
+
+import copy
+import gc
+import http.server
+import json
+from pathlib import Path
+import socket
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from unittest import mock
+
+try:
+    import tkinter as tk
+except ImportError:
+    tk = None
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from c5_config import C5Client, SaveOutcomeUnknown, public_config
+from gui_support import BridgeController, EventUI, load_profile, save_profile, settings_to_args
+if tk is not None:
+    from tcp2com_gui import BridgeGUI
+from test_c5_config import SetupHandler, example_config
+
+
+def wait_for(predicate, update=None, timeout=4):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if update:
+            update()
+        if predicate():
+            return
+        time.sleep(.01)
+    raise AssertionError("operation did not finish")
+
+
+def free_port():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+class ProfileTests(unittest.TestCase):
+    def setUp(self):
+        gc.collect()
+
+    def test_atomic_profile_save_preserves_other_profiles_and_resolves_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "local.json"
+            values = {"device": "c5", "mode": "tcp-server", "port": 8080, "capture": "raw.bin"}
+            save_profile(path, "first", values)
+            save_profile(path, "second", {**values, "capture": "next.bin"})
+            self.assertEqual(set(json.loads(path.read_text())["profiles"]), {"first", "second"})
+            self.assertEqual(load_profile(path, "first")["capture"], str(Path(directory) / "raw.bin"))
+            before = path.read_bytes()
+            with self.assertRaises(ValueError):
+                save_profile(path, "bad", {**values, "port": -1})
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(len(list(Path(directory).iterdir())), 1)
+            with self.assertRaises(ValueError):
+                load_profile(path, "--invalid-profile")
+
+    def test_gui_validation_uses_cli_limits_and_capabilities(self):
+        base = {"device": "c5", "mode": "tcp-server", "com": "loop://"}
+        self.assertTrue(settings_to_args(base).no_reset_ui)
+        for patch in ({"port": 0}, {"mode": "udp", "host": ""}, {"stats_interval": "nan"},
+                      {"usb_port": "loop://"}, {"capture": "data.bin"}, {"verbose": "true"}, {"unknown": 1}):
+            with self.subTest(patch=patch), self.assertRaises(ValueError):
+                settings_to_args({**base, **patch})
+
+    def test_event_queue_stays_bounded_and_reports_overflow(self):
+        ui = EventUI(limit=2)
+        for i in range(100):
+            ui.message(str(i))
+        self.assertEqual(ui.events.qsize(), 2)
+        self.assertEqual(ui.dropped, 98)
+
+
+class ControllerTests(unittest.TestCase):
+    def setUp(self):
+        gc.collect()
+        self.controller = BridgeController()
+
+    def tearDown(self):
+        self.controller.close()
+        self.controller.thread.join(5)
+        self.assertFalse(self.controller.thread.is_alive())
+        gc.collect()
+
+    def test_start_roundtrip_restart_and_release_ports(self):
+        port = free_port()
+        args = settings_to_args({"device": "c5", "mode": "tcp-server", "listen": "127.0.0.1",
+                                 "port": port, "com": "loop://", "stats_interval": .1})
+        self.assertTrue(self.controller.submit("start", args))
+        wait_for(lambda: not self.controller.snapshot()[4])
+        first = self.controller.snapshot()[0]
+        self.assertIsNotNone(first)
+        with socket.create_connection(("127.0.0.1", port), timeout=1) as peer:
+            binary = bytes(range(256)) * 4
+            peer.sendall(binary)
+            received = bytearray()
+            while len(received) < len(binary):
+                received.extend(peer.recv(len(binary) - len(received)))
+            self.assertEqual(received, binary)
+        self.assertTrue(self.controller.submit("restart", args))
+        wait_for(lambda: not self.controller.snapshot()[4])
+        self.assertIsNot(self.controller.snapshot()[0], first)
+        self.assertFalse(first.ser.is_open)
+        self.assertTrue(self.controller.submit("stop"))
+        wait_for(lambda: not self.controller.snapshot()[4])
+        self.assertIsNone(self.controller.snapshot()[0])
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", port))
+
+    def test_usb_failure_is_independent_and_stop_releases_it(self):
+        args = settings_to_args({"device": "c5", "mode": "tcp-server", "listen": "127.0.0.1",
+                                 "port": free_port(), "com": "loop://"})
+        self.controller.submit("start", args)
+        wait_for(lambda: not self.controller.snapshot()[4])
+        app = self.controller.snapshot()[0]
+        args.usb_port = "missing://"
+        self.controller.submit("usb", args)
+        wait_for(lambda: not self.controller.snapshot()[4])
+        self.assertIs(self.controller.snapshot()[0], app)
+        monitor = self.controller.snapshot()[1]
+        self.assertIsNotNone(monitor)
+        self.assertFalse(monitor.status()["connected"])
+        args.usb_port = None
+        self.controller.submit("usb", args)
+        wait_for(lambda: not self.controller.snapshot()[4])
+        self.assertIs(self.controller.snapshot()[0], app)
+        self.assertFalse(monitor.thread.is_alive())
+
+    def test_failed_start_is_stopped_and_does_not_overwrite_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "original.bin"
+            path.write_bytes(b"original")
+            args = settings_to_args({"device": "c5", "mode": "tcp-server", "port": free_port(), "capture": str(path)})
+            self.controller.submit("start", args)
+            wait_for(lambda: not self.controller.snapshot()[4])
+            self.assertIsNone(self.controller.snapshot()[0])
+            self.assertEqual(path.read_bytes(), b"original")
+
+
+class GUITests(unittest.TestCase):
+    def setUp(self):
+        gc.collect()
+        if tk is None:
+            self.skipTest("Tk unavailable")
+        try:
+            self.root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("Tk display unavailable")
+        self.root.withdraw()
+        self.root.geometry("+30000+30000")
+        self.temporary = tempfile.TemporaryDirectory()
+        self.gui = BridgeGUI(self.root, Path(self.temporary.name) / "profiles.json")
+        self.root.update()
+
+    def tearDown(self):
+        if hasattr(self, "gui"):
+            self.gui.close()
+            wait_for(lambda: self.gui.destroyed, self.root.update, timeout=6)
+            self.assertFalse(self.gui.controller.thread.is_alive())
+            self.gui = None
+            self.root = None
+            self.temporary.cleanup()
+        gc.collect()
+
+    def read_fixture(self):
+        config = example_config()
+        self.gui.baseline = config
+        self.gui.read_identity = C5Client(self.gui.config_url.get()).identity
+        self.gui._fill_c5(config)
+        self.gui._c5_enable()
+        return config
+
+    def test_mode_fields_device_capabilities_and_local_output(self):
+        self.assertEqual(self.gui.network.get("device"), "c5")
+        self.assertEqual(str(self.gui.reset_button["state"]), "disabled")
+        self.gui.network.set("mode", "udp")
+        self.assertEqual(str(self.gui.network.widgets["peer_port"]["state"]), "normal")
+        self.gui.network.set("mode", "tcp-client")
+        self.assertEqual(str(self.gui.network.widgets["listen"]["state"]), "disabled")
+        self.gui.output.set("仅接收至文件")
+        self.assertIsNone(self.gui.settings()["com"])
+        self.gui.local.set("capture", "test.bin")
+        self.assertEqual(str(self.gui.local.widgets["com"]["state"]), "disabled")
+        self.read_fixture()
+        self.gui.network.set("device", "esp01s")
+        self.assertIsNone(self.gui.baseline)
+        self.assertEqual(self.gui.tabs.tab(self.gui.c5_frame, "state"), "disabled")
+
+    def test_local_save_does_not_write_device_or_change_running_connection(self):
+        with mock.patch("tcp2com_gui.C5Client.save") as save_device:
+            self.gui.save_profile()
+            save_device.assert_not_called()
+        self.assertTrue(Path(self.gui.profile_path.get()).exists())
+        self.assertIsNone(self.gui.controller.snapshot()[0])
+
+    def test_c5_undo_backup_import_never_persist_passwords(self):
+        baseline = self.read_fixture()
+        self.gui.c5_forms["ap"].set("ap_password", "private-secret")
+        self.gui.c5_forms["pc"].set("ssid", "changed")
+        path = str(Path(self.temporary.name) / "backup.json")
+        with mock.patch("tcp2com_gui.filedialog.asksaveasfilename", return_value=path):
+            self.gui.backup_c5()
+        document = Path(path).read_text(encoding="utf-8")
+        self.assertNotIn("password", document)
+        self.assertNotIn("private-secret", document)
+        self.gui.undo_c5()
+        self.assertEqual(self.gui.edited_c5(), public_config(baseline))
+        with mock.patch("tcp2com_gui.filedialog.askopenfilename", return_value=path):
+            self.gui.import_c5()
+        self.assertEqual(self.gui.c5_forms["pc"].get("ssid"), "changed")
+        self.assertEqual(self.gui.c5_forms["ap"].get("ap_password"), "")
+        self.assertEqual(self.gui.baseline, baseline)
+
+    def test_device_save_requires_read_of_same_endpoint(self):
+        self.read_fixture()
+        self.gui.config_url.set("http://192.168.4.2/")
+        with mock.patch.object(self.gui, "error") as error, mock.patch.object(self.gui, "_http") as http:
+            self.gui.save_c5()
+        self.assertIn("读取", str(error.call_args))
+        http.assert_not_called()
+
+    def test_save_sends_only_delta_and_clear_is_explicit(self):
+        self.read_fixture()
+        self.gui.c5_forms["common"].set("link_mode", 0)
+        self.gui.c5_forms["shared"].set("clear_password", True)
+        with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True), mock.patch.object(self.gui, "_http") as http:
+            self.gui.save_c5()
+        http.assert_called_once_with("save", {"link_mode": 0, "shared": {"password": ""}})
+
+    def test_http_worker_updates_main_thread_and_unknown_invalidates_baseline(self):
+        with mock.patch("c5_config.C5Client.read", return_value=example_config()):
+            self.gui.read_c5()
+            wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        self.assertEqual(self.gui.baseline["config_source"], "nvs")
+        self.gui.http_events.put(("save", self.gui.read_identity, None, SaveOutcomeUnknown("结果待确认")))
+        wait_for(lambda: self.gui.baseline is None, self.root.update)
+        self.assertIn("待确认", self.gui.c5_status.get())
+
+    def test_apply_runtime_edits_and_minimize_keep_forwarding_until_close(self):
+        self.gui.local.set("com", "loop://")
+        self.gui.network.set("listen", "127.0.0.1")
+        self.gui.network.set("port", str(free_port()))
+        self.gui.start("start")
+        wait_for(lambda: self.gui.controller.snapshot()[0] is not None, self.root.update)
+        app = self.gui.controller.snapshot()[0]
+        self.gui.root.iconify()
+        self.gui.local.set("baud", "230400")
+        wait_for(lambda: self.gui.applied.get() == "参数未应用", self.root.update)
+        self.gui.save_profile()
+        self.assertIs(self.gui.controller.snapshot()[0], app)
+        self.assertEqual(app.args.baud, 1152000)
+        self.assertFalse(app.close_event.is_set())
+        self.gui.start("restart")
+        wait_for(lambda: self.gui.controller.snapshot()[0] is not None and self.gui.controller.snapshot()[0] is not app,
+                 self.root.update)
+        self.assertEqual(self.gui.controller.snapshot()[0].args.baud, 230400)
+        self.assertFalse(app.ser.is_open)
+
+    def test_real_setup_api_read_save_and_restart_confirmation(self):
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SetupHandler)
+        server.status, server.delay, server.drop = 200, 0, False
+        server.body = json.dumps(example_config()).encode()
+        server.received, server.requests = [], 0
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": .02}, daemon=True)
+        thread.start()
+        try:
+            self.gui.config_url.set(f"http://127.0.0.1:{server.server_port}/")
+            self.gui.read_c5()
+            wait_for(lambda: self.gui.baseline is not None, self.root.update)
+            self.gui.c5_forms["common"].set("mode", 2)
+            server.body = b'{"saved":true,"restart":true}'
+            with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True):
+                self.gui.save_c5()
+            wait_for(lambda: "已写入 NVS" in self.gui.c5_status.get(), self.root.update)
+            self.assertIsNone(self.gui.baseline)
+            self.assertEqual(server.received, [("/api/config", "application/json", {"mode": 2})])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(1)
+
+    def test_usb_stats_show_stale_and_offline_state(self):
+        monitor = mock.Mock()
+        monitor.port = "COM8"
+        monitor.status.return_value = {"connected": False, "updated_at": time.monotonic() - 20,
+                                       "fields": {"RSSI": "-58", "spi_error": "2"}}
+        self.gui._usb_status(monitor, time.monotonic())
+        self.assertIn("离线", self.gui.usb_status.get())
+        self.assertIn("已过期", self.gui.usb_status.get())
+        self.assertEqual(len(self.gui.usb_tree.get_children()), 2)
+
+    def test_usb_apply_ignores_unapplied_invalid_network_parameters(self):
+        self.gui.network.set("port", "invalid")
+        self.gui.usb_form.set("usb_port", "missing://")
+        with mock.patch.object(self.gui, "error") as error:
+            self.gui.apply_usb()
+        error.assert_not_called()
+        wait_for(lambda: not self.gui.controller.snapshot()[4], self.root.update)
+        self.assertIsNotNone(self.gui.controller.snapshot()[1])
+
+    def test_close_waits_for_inflight_http_without_worker_holding_tk(self):
+        entered, release = threading.Event(), threading.Event()
+        def delayed_read(_client):
+            entered.set()
+            release.wait(2)
+            return example_config()
+        with mock.patch("c5_config.C5Client.read", delayed_read):
+            self.gui.read_c5()
+            self.assertTrue(entered.wait(1))
+            self.gui.close()
+            self.root.update()
+            self.assertFalse(self.gui.destroyed)
+            self.assertTrue(self.gui.http_thread.is_alive())
+            release.set()
+            wait_for(lambda: self.gui.destroyed, self.root.update)
+            self.assertFalse(self.gui.http_thread.is_alive())
+
+    def test_dpi_layout_and_bounded_filtered_logs(self):
+        self.root.tk.call("tk", "scaling", 2.0)
+        self.root.deiconify()
+        self.root.update()
+        for i in range(3500):
+            self.gui.logs.append(f"{i} USB example")
+        self.gui.filter_text.set("3499")
+        self.gui._logs()
+        self.assertEqual(len(self.gui.logs), 3000)
+        self.assertIn("3499", self.gui.log_text.get("1.0", "end"))
+        self.assertNotIn("3498", self.gui.log_text.get("1.0", "end"))
+        self.assertLess(self.gui.tabs.winfo_y(), self.root.winfo_height())
+        self.assertGreater(self.gui.tabs.winfo_height(), 150)
+
+
+if __name__ == "__main__":
+    unittest.main()

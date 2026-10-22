@@ -2,6 +2,7 @@
 
 import re
 import threading
+import time
 
 import serial
 
@@ -26,6 +27,8 @@ class USBMonitor:
         self.thread = None
         self.lock = threading.Lock()
         self.latest = {}
+        self.connected = False
+        self.updated_at = None
 
     def start(self):
         self.thread = threading.Thread(target=self._run, name="usb-diagnostics", daemon=True)
@@ -34,6 +37,11 @@ class USBMonitor:
     def snapshot(self):
         with self.lock:
             return dict(self.latest)
+
+    def status(self):
+        with self.lock:
+            return {"connected": self.connected, "updated_at": self.updated_at,
+                    "fields": dict(self.latest)}
 
     def _run(self):
         output = None
@@ -49,6 +57,8 @@ class USBMonitor:
                     device.dtr = False
                     device.rts = False
                     device.open()
+                    with self.lock:
+                        self.connected = True
                     self.notify(f"USB 日志已连接：{self.port}")
                     pending = bytearray()
                     with device:
@@ -59,7 +69,10 @@ class USBMonitor:
                                 raw, _, pending = pending.partition(b"\n")
                                 line = raw.decode("utf-8", errors="replace").rstrip("\r")
                                 with self.lock:
-                                    self.latest.update(parse_stats(line))
+                                    fields = parse_stats(line)
+                                    if fields:
+                                        self.latest.update(fields)
+                                        self.updated_at = time.monotonic()
                                 self.notify(f"USB | {line}")
                                 if output:
                                     output.write(line + "\n")
@@ -68,9 +81,14 @@ class USBMonitor:
                                 self.notify("USB 日志行超过 16 KiB，已截断")
                                 pending.clear()
                 except (serial.SerialException, OSError, ValueError) as exc:
+                    with self.lock:
+                        self.connected = False
                     if not self.stop_event.is_set():
                         self.notify(f"USB 日志不可用：{exc}；网络透传继续，2 秒后重试")
                         self.stop_event.wait(2)
+                finally:
+                    with self.lock:
+                        self.connected = False
         except OSError as exc:
             self.notify(f"USB 日志文件打开失败：{exc}；网络透传继续")
         finally:

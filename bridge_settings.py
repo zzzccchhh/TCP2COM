@@ -15,7 +15,7 @@ def _unique_object(pairs):
 
 
 def load_defaults(parser, argv):
-    probe = argparse.ArgumentParser(add_help=False)
+    probe = type(parser)(add_help=False)
     probe.add_argument("--config")
     probe.add_argument("--profile")
     selection, _ = probe.parse_known_args(argv)

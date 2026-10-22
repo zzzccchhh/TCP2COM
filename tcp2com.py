@@ -472,6 +472,7 @@ class App:
         refresh = max(0.1, min(self.args.stats_interval, 5.0))
         try:
             while not self.close_event.is_set():
+                refresh = max(0.1, min(getattr(self.ui, "stats_interval", self.args.stats_interval), 5.0))
                 self.close_event.wait(refresh)
                 now = time.monotonic()
                 current = self.stats.snapshot()
@@ -913,8 +914,8 @@ class App:
     # --------------------------------------------------------
 
 
-def parse_args(argv=None):
-    parser = argparse.ArgumentParser(
+def build_parser(parser_class=argparse.ArgumentParser):
+    parser = parser_class(
         prog="tcp2com",
         description="ESP-01S / ESP32-C5 TCP、UDP 与 COM 桥接及二进制接收",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -953,6 +954,11 @@ def parse_args(argv=None):
     parser.add_argument("--stats-interval", type=float, default=0.25, help="底部实时速率刷新间隔秒数")
     parser.add_argument("--connect-timeout", type=float, default=CONNECT_TIMEOUT, help="TCP 连接建立超时秒数")
     parser.add_argument("-v", "--verbose", action="store_true", help="输出调试日志")
+    return parser
+
+
+def parse_args(argv=None, parser_class=argparse.ArgumentParser):
+    parser = build_parser(parser_class)
     load_defaults(parser, argv)
     args = parser.parse_args(argv)
 
