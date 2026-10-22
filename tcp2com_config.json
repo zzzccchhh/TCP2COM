@@ -1,0 +1,47 @@
+{
+  "profiles": {
+    "c5-spi-tcp": {
+      "device": "c5",
+      "mode": "tcp-server",
+      "listen": "0.0.0.0",
+      "port": 8080,
+      "com": "COM1",
+      "baud": 1152000
+    },
+    "c5-client": {
+      "device": "c5",
+      "mode": "tcp-client",
+      "host": "192.168.4.1",
+      "port": 8080,
+      "com": "COM1",
+      "baud": 1152000
+    },
+    "c5-spi-udp": {
+      "device": "c5",
+      "mode": "udp",
+      "listen": "0.0.0.0",
+      "port": 8080,
+      "host": "192.168.137.200",
+      "peer_port": 6060,
+      "udp_payload": 1200,
+      "com": "COM1",
+      "baud": 1152000
+    },
+    "c5-capture": {
+      "device": "c5",
+      "mode": "tcp-server",
+      "listen": "0.0.0.0",
+      "port": 8080,
+      "capture": "received.bin"
+    },
+    "esp01s": {
+      "device": "esp01s",
+      "mode": "tcp-client",
+      "host": "192.168.4.1",
+      "port": 8080,
+      "com": "COM1",
+      "baud": 1152000,
+      "control_port": 8081
+    }
+  }
+}

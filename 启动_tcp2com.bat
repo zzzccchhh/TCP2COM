@@ -7,7 +7,7 @@ rem TCP <-> COM bridge launcher. Keep this file ASCII-only to avoid
 rem mojibake when Windows cmd.exe interprets a UTF-8 batch file.
 
 rem ===== TCP server =====
-set "T2C_HOST=192.168.137.200"
+set "T2C_HOST=192.168.4.1"
 set "T2C_PORT=8080"
 set "T2C_CONTROL_PORT=8081"
 

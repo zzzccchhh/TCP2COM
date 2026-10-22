@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""TCP <-> COM 双向桥接工具。
+"""ESP-01S / ESP32-C5 TCP、UDP <-> COM 双向桥接与原始数据接收。
 
 特性：
 - TCP -> 串口、串口 -> TCP 双向透传
@@ -25,10 +25,14 @@ import socket
 import sys
 import threading
 import time
+import math
+import webbrowser
 from typing import Optional, Tuple
 
 from console_control import WindowsConsoleControl
 from reset_control import ConsoleResetController
+from bridge_settings import load_defaults
+from network_transport import TCPServer, DatagramStream, DatagramSendError
 
 try:
     import serial
@@ -36,6 +40,8 @@ try:
 except ImportError:
     sys.stderr.write("缺少 pyserial，请执行：py -3 -m pip install pyserial\n")
     raise SystemExit(1)
+
+from usb_diagnostics import USBMonitor
 
 log = logging.getLogger("tcp2com")
 
@@ -50,6 +56,10 @@ SERIAL_BATCH_BYTES = 64 * 1024
 SERIAL_WRITE_CHUNK_BYTES = 4 * 1024
 RATE_WINDOW_SECONDS = 1.0
 WARN_INTERVAL = 3.0
+
+
+class CaptureWriteError(OSError):
+    pass
 
 _BYTESIZES = {
     "5": serial.FIVEBITS,
@@ -304,7 +314,7 @@ class Connection:
 
     def is_current(self, sock: socket.socket, generation: int) -> bool:
         with self._lock:
-            return self._sock is sock and self._generation == generation
+            return self._sock is not None and self._sock is sock and self._generation == generation
 
     def close_current(self, reason: str) -> None:
         with self._lock:
@@ -326,7 +336,8 @@ class Connection:
 
 
 class Stats:
-    KEYS = ("tcp_rx_bytes", "tcp_to_com_bytes", "com_to_tcp_bytes", "tcp_to_com_drop", "com_to_tcp_drop")
+    KEYS = ("tcp_rx_bytes", "tcp_to_com_bytes", "com_to_tcp_bytes", "tcp_to_com_drop", "com_to_tcp_drop",
+            "udp_rx_packets", "udp_tx_packets", "udp_rejected", "udp_empty")
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -348,6 +359,11 @@ class App:
         self.args = args
         self.ui = ui
         self.ser = None
+        self.capture = None
+        self.server = None
+        self.udp = None
+        self.usb = None
+        self.last_udp_rx = None
         self.close_event = threading.Event()
         self.conn = Connection()
         self.stats = Stats()
@@ -363,37 +379,65 @@ class App:
 
     def start(self) -> bool:
         try:
-            self.ser = serial.serial_for_url(
-                self.args.com,
-                baudrate=self.args.baud,
-                bytesize=_BYTESIZES[self.args.bytesize],
-                parity=_PARITIES[self.args.parity],
-                stopbits=_STOPBITS[self.args.stopbits],
-                timeout=self.args.timeout,
-                write_timeout=self.args.write_timeout,
-                **flow_kwargs(self.args.flow),
-            )
+            if self.args.com:
+                self.ser = serial.serial_for_url(
+                    self.args.com,
+                    baudrate=self.args.baud,
+                    bytesize=_BYTESIZES[self.args.bytesize],
+                    parity=_PARITIES[self.args.parity],
+                    stopbits=_STOPBITS[self.args.stopbits],
+                    timeout=self.args.timeout,
+                    write_timeout=self.args.write_timeout,
+                    **flow_kwargs(self.args.flow),
+                )
+            else:
+                # Exclusive creation protects existing recordings from accidental overwrite.
+                self.capture = open(self.args.capture, "xb", buffering=0)
+            if self.args.mode == "tcp-server":
+                self.server = TCPServer((self.args.listen, self.args.port), self.ui.message, self.args.host)
+            elif self.args.mode == "udp":
+                self.udp = DatagramStream((self.args.listen, self.args.port),
+                                          (self.args.host, self.args.peer_port), self.args.udp_payload,
+                                          self.close_event, self._udp_record)
         except (serial.SerialException, OSError, ValueError) as exc:
-            self.ui.message(f"打开串口 {self.args.com} 失败：{exc}；请检查 COM 号和端口占用")
+            self.ui.message(f"启动失败：{exc}；请检查端口占用、地址和输出文件")
             self.exit_code = 1
+            self.stop()
             return False
 
-        workers = (
+        workers = [
             (self._tcp_recv_worker, "tcp-recv"),
-            (self._serial_write_worker, "serial-write"),
-            (self._serial_read_worker, "serial-read"),
-            (self._tcp_send_worker, "tcp-send"),
-        )
+        ]
+        if self.ser is not None:
+            workers.extend(((self._serial_write_worker, "serial-write"),
+                            (self._serial_read_worker, "serial-read"),
+                            (self._tcp_send_worker, "tcp-send")))
         for target, name in workers:
             thread = threading.Thread(target=target, name=name, daemon=True)
             thread.start()
             self.threads.append(thread)
 
-        self.ui.message(
-            f"桥接启动：{self.args.com}，{self.args.baud} baud，"
-            f"{self.args.bytesize}{self.args.parity}{self.args.stopbits}，流控={self.args.flow}"
-        )
-        self.ui.message(f"TCP 目标：{self.args.host}:{self.args.port}")
+        if self.ser:
+            self.ui.message(
+                f"桥接启动：{self.args.com}，{self.args.baud} baud，"
+                f"{self.args.bytesize}{self.args.parity}{self.args.stopbits}，流控={self.args.flow}"
+            )
+        if self.args.mode == "tcp-client":
+            self.ui.message(f"TCP 目标：{self.args.host}:{self.args.port}")
+        else:
+            address = self.server.address if self.server else self.udp.address
+            self.ui.message(f"{self.args.mode} 已绑定：{address[0]}:{address[1]}")
+            if self.server:
+                self.ui.message("CH32 目标填写电脑热点/局域网 IPv4 地址（不是 0.0.0.0），并先启动本程序；断线后需主控重新连接")
+            else:
+                self.ui.message(f"UDP 固定对端 {self.args.host}:{self.args.peer_port}；报文载荷 {self.args.udp_payload} B；不保证送达/顺序")
+        if self.capture:
+            self.ui.message(f"仅网络接收，原始载荷保存至：{self.args.capture}；不写入任何日志文本")
+        if self.args.device == "c5":
+            self.ui.message("C5 无 TCP 8081 远程复位；GPIO12 是主控发给 C5 的软件 RST 输入")
+        if self.args.usb_port:
+            self.usb = USBMonitor(self.args.usb_port, self.args.usb_baud, self.ui.message, self.args.usb_log)
+            self.usb.start()
         self.ui.message(
             f"参数：重连={self.args.reconnect:.1f}s，Keepalive 空闲={self.args.keepalive_idle:.1f}s，"
             f"探测间隔={self.args.keepalive_interval:.1f}s，缓冲={self.args.bufsize}B，"
@@ -402,6 +446,24 @@ class App:
         if os.name == "nt":
             self.ui.message("说明：Windows Keepalive 探测次数通常由系统控制；断电检测并非即时")
         return True
+
+    def _udp_record(self, key, amount):
+        self.stats.add(key, amount)
+        if key == "udp_rx_packets":
+            self.last_udp_rx = time.monotonic()
+
+    def _capture_write(self, data):
+        remaining = memoryview(data)
+        try:
+            while remaining:
+                written = self.capture.write(remaining)
+                if not written:
+                    raise OSError("文件写入没有进展")
+                self.stats.add("tcp_to_com_bytes", written)
+                remaining = remaining[written:]
+        except OSError as exc:
+            self.stats.add("tcp_to_com_drop", len(remaining))
+            raise CaptureWriteError(str(exc)) from exc
 
     def run(self) -> None:
         last = time.monotonic()
@@ -426,16 +488,23 @@ class App:
                 tcp_to_com_rate = (current["tcp_to_com_bytes"] - base["tcp_to_com_bytes"]) / dt
                 com_to_tcp_rate = (current["com_to_tcp_bytes"] - base["com_to_tcp_bytes"]) / dt
                 sock, _ = self.conn.snapshot()
-                state = "已连接" if sock is not None else "重连等待/未连接"
+                state = "已连接" if sock is not None else "等待连接"
+                if self.args.mode == "udp":
+                    age = "尚未收包" if self.last_udp_rx is None else f"距收包 {now - self.last_udp_rx:.1f}s"
+                    state = f"已绑定，{age}"
                 q_depth = self.q_tcp_to_com.qsize()
+                label = "UDP" if self.args.mode == "udp" else "TCP"
                 rate = (
-                    f"TCP:{state} | TCP收 {human_bytes(tcp_rx_rate)}/s | "
-                    f"串口写 {human_bytes(tcp_to_com_rate)}/s | "
-                    f"队列 {q_depth}/{QUEUE_BLOCKS}块 | "
-                    f"串口→TCP {human_bytes(com_to_tcp_rate)}/s | "
+                    f"{label}:{state} | 网络收 {human_bytes(tcp_rx_rate)}/s | "
+                    f"本地写 {human_bytes(tcp_to_com_rate)}/s | "
+                    f"队列↓↑ {q_depth}/{self.q_com_to_tcp.qsize()}（各{QUEUE_BLOCKS}块） | "
+                    f"本地→网络 {human_bytes(com_to_tcp_rate)}/s | "
                     f"累计丢弃 {human_bytes(current['tcp_to_com_drop'])}/"
                     f"{human_bytes(current['com_to_tcp_drop'])}"
                 )
+                if self.args.mode == "udp":
+                    rate += (f" | UDP包收/发 {current['udp_rx_packets']}/{current['udp_tx_packets']}"
+                             f" 拒收 {current['udp_rejected']}")
                 self.ui.set_rate_line(rate, refresh)
         except KeyboardInterrupt:
             self.close_event.set()
@@ -447,6 +516,12 @@ class App:
         self.stopped = True
         self.close_event.set()
         self.conn.close_current("程序退出")
+        if self.server:
+            self.server.close()
+        if self.udp:
+            self.udp.close()
+        if self.usb:
+            self.usb.close()
         for thread in self.threads:
             thread.join(timeout=2.0)
             if thread.is_alive():
@@ -456,15 +531,20 @@ class App:
                 self.ser.close()
             except (serial.SerialException, OSError):
                 pass
+        if self.capture:
+            self.capture.close()
         values = self.stats.snapshot()
         self.ui.message(
-            "退出统计：TCP→串口已写入 %s（丢弃 %s）；串口→TCP已发送 %s（丢弃 %s）" % (
+            "退出统计：网络→本地已写入 %s（丢弃 %s）；本地→网络已发送 %s（丢弃 %s）" % (
                 human_bytes(values["tcp_to_com_bytes"]),
                 human_bytes(values["tcp_to_com_drop"]),
                 human_bytes(values["com_to_tcp_bytes"]),
                 human_bytes(values["com_to_tcp_drop"]),
             )
         )
+        if self.args.mode == "udp":
+            self.ui.message(f"UDP 报文收/发={values['udp_rx_packets']}/{values['udp_tx_packets']}，"
+                            f"非指定对端拒收={values['udp_rejected']}，空报文={values['udp_empty']}；不代表链路零丢包")
         return self.exit_code
 
     def _set_queue_pressure(self, name: str, active: bool) -> None:
@@ -475,7 +555,7 @@ class App:
             self.pressure_active[name] = active
         if active:
             self.ui.message(
-                f"{name} 队列达到上限，暂停上游读取进行背压；保留数据顺序，不主动丢弃新数据"
+                f"{name} 队列达到上限，暂停上游读取；UDP/真实串口的上游仍可能溢出，保留本地队列顺序"
             )
         else:
             self.ui.message(f"{name} 队列积压已缓解")
@@ -528,21 +608,31 @@ class App:
     def _tcp_recv_worker(self) -> None:
         addr = (self.args.host, self.args.port)
         announced_wait = False
-        self.ui.state("connecting", f"正在连接 TCP {addr[0]}:{addr[1]}...")
+        self.ui.state("connecting", f"网络模式：{self.args.mode}，等待数据通道...")
 
         while not self.close_event.is_set():
             sock = None
             try:
-                sock = socket.create_connection(addr, timeout=self.args.connect_timeout)
-                configure_socket(
-                    sock,
-                    self.args.keepalive_idle,
-                    self.args.keepalive_interval,
-                    self.args.keepalive_count,
-                )
+                if self.server:
+                    sock = self.server.connect(self.close_event)
+                elif self.udp:
+                    sock = self.udp
+                else:
+                    sock = socket.create_connection(addr, timeout=self.args.connect_timeout)
+                if not self.udp:
+                    configure_socket(sock, self.args.keepalive_idle,
+                                     self.args.keepalive_interval, self.args.keepalive_count)
+                peer = sock.getpeername()
             except OSError as exc:
                 close_socket(sock)
+                if self.server:
+                    self.server.release(sock)
                 if self.close_event.is_set():
+                    break
+                if self.server or self.udp:
+                    self.ui.message(f"监听/UDP 通道失败：{exc}")
+                    self.exit_code = 1
+                    self.close_event.set()
                     break
                 if not announced_wait:
                     self.ui.state("waiting", f"TCP 连接失败，进入自动重试：{exc}")
@@ -556,6 +646,8 @@ class App:
 
             if self.close_event.is_set():
                 close_socket(sock)
+                if self.server:
+                    self.server.release(sock)
                 break
 
             # 清理断线期间或上次会话遗留数据，再安装新连接代次。
@@ -563,7 +655,7 @@ class App:
             self._clear_old_queue(self.q_com_to_tcp, "com_to_tcp_drop", "重连前串口→TCP队列")
             generation = self.conn.set(sock)
             announced_wait = False
-            self.ui.state("connected", f"TCP 已连接 {addr[0]}:{addr[1]}")
+            self.ui.state("connected", f"{'UDP 已绑定，固定对端' if self.udp else 'TCP 已连接'} {peer[0]}:{peer[1]}")
             reason = "连接结束"
 
             try:
@@ -575,20 +667,33 @@ class App:
                     # Count the actual TCP ingress separately from bytes accepted
                     # by the serial writer, so queue/backpressure can be diagnosed.
                     self.stats.add("tcp_rx_bytes", len(data))
-                    if not self._enqueue(self.q_tcp_to_com, "tcp_to_com", generation, data):
+                    if self.capture:
+                        # Write before EOF handling: a short-lived sender must not lose its tail.
+                        self._capture_write(data)
+                    elif not self._enqueue(self.q_tcp_to_com, "tcp_to_com", generation, data):
                         reason = "连接代次变化或程序退出"
                         break
             except OSError as exc:
-                reason = f"TCP 接收异常：{exc}"
+                reason = f"网络/文件接收异常：{exc}"
+                if not self.close_event.is_set() and (isinstance(exc, CaptureWriteError) or self.udp):
+                    self.exit_code = 1
+                    self.close_event.set()
+                    self.ui.message(reason)
             finally:
                 self.conn.kill(sock, reason)
                 self._clear_old_queue(self.q_tcp_to_com, "tcp_to_com_drop", "断线后 TCP→串口队列")
                 self._clear_old_queue(self.q_com_to_tcp, "com_to_tcp_drop", "断线后串口→TCP队列")
+                if self.server:
+                    self.server.release(sock)
                 if not self.close_event.is_set():
                     # 无论由接收线程还是发送线程首先发现故障，都只在状态变化时提示一次。
-                    self.ui.state("waiting", f"TCP 已断开（{reason}），等待重连")
+                    self.ui.state("waiting", f"网络会话结束（{reason}），{'继续监听，等待主控重连' if self.server else '等待重连'}")
 
             if self.close_event.is_set():
+                break
+            if self.server:
+                continue
+            if self.udp:
                 break
             if self.args.reconnect <= 0:
                 self.exit_code = 1
@@ -731,9 +836,19 @@ class App:
             sock, current_generation = self.conn.snapshot()
             if sock is None:
                 if pending is not None:
-                    self.stats.add("com_to_tcp_drop", len(pending[1]))
-                    pending = None
-                dropped = self._drain_queue(q)
+                    if not self.conn.is_current_generation(pending[0]):
+                        self.stats.add("com_to_tcp_drop", len(pending[1]))
+                        pending = None
+                dropped = 0
+                while pending is None:
+                    try:
+                        item = q.get_nowait()
+                    except queue.Empty:
+                        break
+                    if self.conn.is_current_generation(item[0]):
+                        pending = item
+                    else:
+                        dropped += len(item[1])
                 self._set_queue_pressure("com_to_tcp", False)
                 if dropped:
                     self.stats.add("com_to_tcp_drop", dropped)
@@ -753,6 +868,8 @@ class App:
                 self._set_queue_pressure("com_to_tcp", False)
 
             generation, block = item
+            # q.get may span a disconnect and reconnect. Refresh the socket after waiting.
+            sock, current_generation = self.conn.snapshot()
             if generation != current_generation or not self.conn.is_current(sock, generation):
                 self.stats.add("com_to_tcp_drop", len(block))
                 continue
@@ -785,7 +902,9 @@ class App:
                 sock.sendall(payload)
                 self.stats.add("com_to_tcp_bytes", len(payload))
             except OSError as exc:
-                self.stats.add("com_to_tcp_drop", len(payload))
+                confirmed = exc.sent if isinstance(exc, DatagramSendError) else 0
+                self.stats.add("com_to_tcp_bytes", confirmed)
+                self.stats.add("com_to_tcp_drop", len(payload) - confirmed)
                 self.conn.kill(sock, f"TCP 发送失败：{exc}")
                 # 接收线程会发现 socket 失效并统一处理重连。
 
@@ -797,11 +916,24 @@ class App:
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         prog="tcp2com",
-        description="TCP 客户端 <-> 本地 COM 串口双向桥接",
+        description="ESP-01S / ESP32-C5 TCP、UDP 与 COM 桥接及二进制接收",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--host", help="TCP 服务端 IP 或主机名")
-    parser.add_argument("--port", type=int, default=8080, help="TCP 服务端端口")
+    parser.add_argument("--config", help="JSON 配置文件；仅显式指定时读取")
+    parser.add_argument("--profile", help="JSON profiles 中的配置名称")
+    parser.add_argument("--device", choices=("esp01s", "c5"), default="esp01s", help="设备能力；C5 禁用旧复位入口")
+    parser.add_argument("--mode", choices=("tcp-client", "tcp-server", "udp"), default="tcp-client")
+    parser.add_argument("--listen", default="0.0.0.0", help="TCP 服务端/UDP 本地 IPv4 绑定地址")
+    parser.add_argument("--peer-port", type=int, default=6060, help="UDP 对端 C5 本地端口")
+    parser.add_argument("--udp-payload", type=int, default=1200, help="本地→UDP 每包最大载荷，1～65507")
+    parser.add_argument("--capture", help="仅网络接收至新建二进制文件，与 --com 二选一")
+    parser.add_argument("--usb-port", help="C5 原生 USB 日志 COM；与业务 COM 不同")
+    parser.add_argument("--usb-baud", type=int, default=115200, help="USB 日志串口参数")
+    parser.add_argument("--usb-log", help="USB 文本日志文件，追加保存")
+    parser.add_argument("--open-config", action="store_true", help="仅打开 C5 配网页面后退出；需先手动进入配置热点")
+    parser.add_argument("--config-url", default="http://192.168.4.1/", help="C5 配网页面地址")
+    parser.add_argument("--host", help="TCP 客户端/UDP 的对端地址；TCP 服务端可选的来源 IP 筛选")
+    parser.add_argument("--port", type=int, default=8080, help="TCP 客户端目标端口；TCP 服务端/UDP 本地监听端口")
     parser.add_argument("--control-port", type=int, default=8081, help="ESP 独立复位控制端口")
     parser.add_argument("--no-reset-ui", action="store_true", help="关闭命令行急停入口及复位弹窗功能")
     parser.add_argument("--com", help="本地串口，例如 COM5")
@@ -821,16 +953,24 @@ def parse_args(argv=None):
     parser.add_argument("--stats-interval", type=float, default=0.25, help="底部实时速率刷新间隔秒数")
     parser.add_argument("--connect-timeout", type=float, default=CONNECT_TIMEOUT, help="TCP 连接建立超时秒数")
     parser.add_argument("-v", "--verbose", action="store_true", help="输出调试日志")
+    load_defaults(parser, argv)
     args = parser.parse_args(argv)
 
     if args.list_coms:
         return args
-    missing = [name for name, value in (("--host", args.host), ("--com", args.com)) if not value]
-    if missing:
-        parser.error("缺少必填参数：" + ", ".join(missing))
+    if args.open_config:
+        if not args.config_url.startswith(("http://", "https://")):
+            parser.error("--config-url 必须使用 http:// 或 https://")
+        return args
+    if args.mode != "tcp-server" and not args.host:
+        parser.error("TCP 客户端和 UDP 需要 --host")
+    if bool(args.com) == bool(args.capture):
+        parser.error("--com 和 --capture 必须且只能选择一个")
     if not 1 <= args.port <= 65535:
         parser.error("--port 必须在 1～65535 之间")
-    if not 1 <= args.control_port <= 65535 or args.control_port == args.port:
+    if args.device == "c5" or args.mode != "tcp-client":
+        args.no_reset_ui = True
+    if not 1 <= args.control_port <= 65535 or (not args.no_reset_ui and args.control_port == args.port):
         parser.error("--control-port 必须在 1～65535 之间，且不能与透传端口相同")
     if args.baud <= 0:
         parser.error("--baud 必须大于 0")
@@ -840,6 +980,24 @@ def parse_args(argv=None):
         parser.error("重连 / Keepalive 参数不合法")
     if args.timeout < 0 or args.write_timeout <= 0 or args.connect_timeout <= 0 or args.stats_interval <= 0:
         parser.error("超时参数和速率刷新间隔必须大于 0（串口 timeout 可为 0）")
+    for key in ("reconnect", "keepalive_idle", "keepalive_interval", "timeout", "write_timeout", "connect_timeout", "stats_interval"):
+        value = getattr(args, key)
+        if not 0 <= value <= 86400 or not math.isfinite(value):
+            parser.error(f"{key} 必须为有限数值，且不超过 86400 秒")
+    if not 1 <= args.peer_port <= 65535 or not 1 <= args.udp_payload <= 65507:
+        parser.error("UDP 对端端口范围 1～65535，载荷范围 1～65507")
+    if args.usb_baud <= 0 or (args.usb_log and not args.usb_port):
+        parser.error("USB 波特率必须大于 0；--usb-log 需要 --usb-port")
+    if args.usb_port and args.device != "c5":
+        parser.error("--usb-port 仅用于 C5 原生 USB 日志")
+    if args.usb_port and args.com and args.usb_port.casefold() == args.com.casefold():
+        parser.error("USB 日志端口不能与业务 COM 相同")
+    if args.capture and args.usb_log and os.path.realpath(args.capture).casefold() == os.path.realpath(args.usb_log).casefold():
+        parser.error("二进制载荷与 USB 文本日志不能写到同一文件")
+    try:
+        socket.inet_pton(socket.AF_INET, args.listen)
+    except OSError:
+        parser.error("--listen 必须是本机 IPv4 地址或 0.0.0.0")
     return args
 
 
@@ -865,6 +1023,9 @@ def main(argv=None):
     if args.list_coms:
         list_coms()
         return 0
+    if args.open_config:
+        print("长按 C5 按键至少 3 秒后松开，连接 ESP32-C5-Setup，再使用配置网页。普通业务模式返回 403。")
+        return 0 if webbrowser.open(args.config_url) else 1
 
     ui = ConsoleUI()
     app = App(args, ui)

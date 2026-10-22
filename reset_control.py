@@ -218,20 +218,24 @@ class ResetPanel:
             return
         self.button.configure(state=self.tk.DISABLED)
         self._set_status("正在发送复位请求…")
-        self.worker = threading.Thread(target=self.request_reset, name="remote-reset", daemon=True)
+        # The worker must not retain Tk objects, even while the window is closing.
+        self.worker = threading.Thread(target=self.request_reset,
+                                       args=(self.app.args.host, self.app.args.control_port,
+                                             self.events, self.cancel, self.app.ui.message),
+                                       name="remote-reset", daemon=True)
         self.worker.start()
 
-    def request_reset(self):
+    @staticmethod
+    def request_reset(host, port, events, cancel, notify):
         try:
             perform_reset(
-                self.app.args.host, self.app.args.control_port,
-                lambda text: self.events.put((False, text)), self.cancel,
+                host, port, lambda text: events.put((False, text)), cancel,
             )
             message = "复位完成：GPIO0 已释放，恢复正常状态灯"
         except ResetError as exc:
             message = str(exc)
-        self.app.ui.message(message)
-        self.events.put((True, message))
+        notify(message)
+        events.put((True, message))
 
     def poll(self):
         self.poll_job = None
@@ -279,3 +283,6 @@ class ResetPanel:
             self.root.after_cancel(self.poll_job)
             self.poll_job = None
         self.root.destroy()
+        # Release Tcl-backed variables on the UI thread, not later in a worker's GC.
+        self.status = None
+        self.bridge_state = None

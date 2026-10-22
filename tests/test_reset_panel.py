@@ -1,5 +1,6 @@
 """Run the real bridge and hidden Tk panel against local simulated ESP sockets."""
 import contextlib
+import gc
 import io
 import pathlib
 import socket
@@ -16,6 +17,10 @@ from reset_control import ConsoleResetController, ResetOutcomeUnknown, ResetPane
 
 
 class PanelLayoutTests(unittest.TestCase):
+    def setUp(self):
+        # Collect destroyed interpreters from earlier cases on their owning UI thread.
+        gc.collect()
+
     def test_scaled_fonts_and_multiline_status_are_not_clipped(self):
         try:
             import tkinter as tk
@@ -65,6 +70,7 @@ class PanelLayoutTests(unittest.TestCase):
 
 class WindowLifecycleTests(unittest.TestCase):
     def setUp(self):
+        gc.collect()
         try:
             import tkinter as tk
             self.root = tk.Tk()
@@ -171,11 +177,16 @@ class WindowLifecycleTests(unittest.TestCase):
         self.assertTrue(panel.cancel.is_set())
         self.assertIsNone(self.window.poll_job)
         self.assertIsNone(panel.poll_job)
+        self.assertIsNone(panel.status)
+        self.assertIsNone(panel.bridge_state)
         self.app.ui.disable_reset_entry.assert_called_once()
         self.app.conn.close_current.assert_not_called()
 
 
 class PanelIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        gc.collect()
+
     def test_console_click_bridge_echo_reconnect_hidden_reset_and_shutdown(self):
         try:
             import tkinter as tk
