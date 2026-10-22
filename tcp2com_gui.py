@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import webbrowser
 
 from c5_config import C5Client, ConfigError, SaveOutcomeUnknown, changed_config, public_config
+from c5_usb_config import C5USBClient
 from gui_support import (BridgeController, atomic_json, config_job, default_settings,
                          load_profile, read_profiles, save_profile, settings_to_args)
 from reset_control import ResetPanel
@@ -118,7 +119,7 @@ class BridgeGUI:
         self.runtime = tk.StringVar(root, value="")
         self.rates = tk.StringVar(root, value="网络接收 / 本地写入 / 网络发送：0 B/s")
         self.totals = tk.StringVar(root, value="队列 0 / 0 · 累计丢弃 0 / 0")
-        self.c5_status = tk.StringVar(root, value="尚未读取 C5；先进入配置热点，再读取")
+        self.c5_status = tk.StringVar(root, value="尚未读取 C5；可选择 USB 单线连接，或 Wi-Fi 配置热点")
         self.c5_dirty = tk.StringVar(root, value="请先读取")
         self.usb_status = tk.StringVar(root, value="USB 诊断未启动")
         self.filter_text = tk.StringVar(root)
@@ -202,8 +203,9 @@ class BridgeGUI:
         self.advanced.add("verbose", "调试日志", False, boolean=True)
         self._build_c5()
         self.usb_form = self._tab("USB 诊断")
-        self.usb_form.note("C5 原生 USB Serial/JTAG 日志，独立于业务 COM；不写入透传载荷。可在未启动桥接时单独开启。")
-        self.usb_form.add("usb_port", "USB 日志 COM（留空关闭）", "", serial_port=True)
+        self.usb_form.note("C5 原生 USB Serial/JTAG 日志及配置共用此连接，独立于业务 COM。可在未启动桥接时单独开启。")
+        self.usb_form.add("usb_port", "USB COM（日志 / 配置，留空关闭）", "", serial_port=True)
+        self.c5_usb_combo.configure(textvariable=self.usb_form.variables["usb_port"])
         ttk.Button(self.usb_form.frame, text="刷新串口", command=self.refresh_ports).grid(row=1, column=2, padx=6)
         for widget in (self.local.widgets["com"], self.usb_form.widgets["usb_port"]):
             widget.configure(postcommand=self.refresh_ports)
@@ -228,6 +230,7 @@ class BridgeGUI:
             for variable in form.variables.values():
                 variable.trace_add("write", lambda *_: self._sync())
         self.output.trace_add("write", lambda *_: self._sync())
+        self.config_transport.trace_add("write", lambda *_: self._c5_enable())
 
     def _tab(self, text):
         frame = ttk.Frame(self.tabs)
@@ -239,6 +242,19 @@ class BridgeGUI:
     def _build_c5(self):
         self.c5_frame = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(self.c5_frame, text="C5 用户配置")
+        connection = ttk.Frame(self.c5_frame)
+        connection.pack(fill="x", pady=(0, 6))
+        ttk.Label(connection, text="连接方式").pack(side="left")
+        self.config_transport = tk.StringVar(self.root, value="Wi-Fi HTTP")
+        self.transport_combo = ttk.Combobox(connection, textvariable=self.config_transport,
+                                            values=("USB", "Wi-Fi HTTP"), state="readonly", width=13)
+        self.transport_combo.pack(side="left", padx=6)
+        ttk.Label(connection, text="USB COM").pack(side="left")
+        self.c5_usb_combo = ttk.Combobox(connection, width=16, postcommand=self.refresh_ports)
+        self.c5_usb_combo.pack(side="left", padx=6)
+        self.usb_connect_button = ttk.Button(connection, text="连接 / 应用 USB", command=self.connect_c5_usb)
+        self.usb_connect_button.pack(side="left", padx=2)
+        ttk.Button(connection, text="刷新串口", command=self.refresh_ports).pack(side="left", padx=2)
         toolbar = ttk.Frame(self.c5_frame)
         toolbar.pack(fill="x")
         ttk.Label(toolbar, text="配置地址").pack(side="left")
@@ -251,9 +267,10 @@ class BridgeGUI:
             button = ttk.Button(toolbar, text=text, command=callback)
             button.pack(side="left", padx=2)
             self.c5_buttons.append(button)
-        ttk.Label(self.c5_frame, text="长按 GPIO24 ≥3 秒后松开，连接 ESP32-C5-Setup。普通模式返回 403；配置热点固定 192.168.4.1。",
+        ttk.Label(self.c5_frame, text="USB：只接 Type-C，选 COM 并连接后读取，无需启动业务桥接。Wi-Fi：长按 GPIO24 ≥3 秒后松开，连接 ESP32-C5-Setup。",
                   wraplength=1000).pack(anchor="w", pady=(8, 2))
         ttk.Label(self.c5_frame, textvariable=self.c5_status, foreground="#1d4ed8", wraplength=1000).pack(anchor="w", pady=4)
+        ttk.Label(self.c5_frame, textvariable=self.usb_status, wraplength=1000).pack(anchor="w")
         bar = ttk.Frame(self.c5_frame)
         bar.pack(fill="x", pady=4)
         for text, callback in (("撤销编辑", self.undo_c5), ("备份（不含密码）", self.backup_c5), ("导入备份到编辑区", self.import_c5)):
@@ -317,6 +334,7 @@ class BridgeGUI:
             for key in form.variables:
                 form.set(key, values.get(key))
         self.config_url.set(values["config_url"])
+        self.config_transport.set("USB" if values["config_transport"] == "usb" else "Wi-Fi HTTP")
         self.output.set("仅接收至文件" if values.get("capture") else "COM 双向桥接")
 
     def settings(self):
@@ -324,7 +342,9 @@ class BridgeGUI:
         for form in (self.network, self.local, self.advanced, self.usb_form):
             result.update(form.values())
         result["config_url"] = self.config_url.get().strip()
-        C5Client(result["config_url"])
+        result["config_transport"] = "usb" if self.config_transport.get() == "USB" else "http"
+        if result["config_transport"] == "http":
+            C5Client(result["config_url"])
         if self.output.get() == "仅接收至文件":
             result["com"] = None
         else:
@@ -365,7 +385,12 @@ class BridgeGUI:
         enabled = self.network.get("device") == "c5" and not self.http_busy and not self.closing
         for index, button in enumerate(self.c5_buttons):
             button.configure(state="normal" if enabled and (index in (0, 1) or self.baseline is not None) else "disabled")
-        self.url_entry.configure(state="normal" if not self.http_busy else "disabled")
+        usb = self.config_transport.get() == "USB"
+        self.c5_buttons[0].configure(state="normal" if enabled and not usb else "disabled")
+        self.url_entry.configure(state="normal" if not self.http_busy and not usb else "disabled")
+        self.transport_combo.configure(state="readonly" if enabled else "disabled")
+        self.c5_usb_combo.configure(state="normal" if enabled and usb else "disabled")
+        self.usb_connect_button.configure(state="normal" if enabled and usb else "disabled")
         self.network.widgets["device"].configure(state="disabled" if self.http_busy else "readonly")
         self._c5_changes()
 
@@ -442,7 +467,7 @@ class BridgeGUI:
 
     def refresh_ports(self):
         ports = [port.device for port in list_ports.comports()]
-        for widget in (self.local.widgets["com"], self.usb_form.widgets["usb_port"]):
+        for widget in (self.local.widgets["com"], self.usb_form.widgets["usb_port"], self.c5_usb_combo):
             widget.configure(values=ports)
         self.controller.ui.message("可用串口：" + ("、".join(ports) or "未发现，可手动填写端口或 loop://"))
 
@@ -452,6 +477,9 @@ class BridgeGUI:
             self.reset_panel = None
 
     def start(self, command):
+        if self.http_busy:
+            self.error("配置请求正在进行，请等待完成后再启动或重启桥接")
+            return
         try:
             args = settings_to_args(self.settings())
             self._reset_shutdown()
@@ -460,22 +488,45 @@ class BridgeGUI:
             self.error(exc)
 
     def stop(self):
+        if self.http_busy:
+            self.error("配置请求正在进行，请等待完成后再停止 USB")
+            return
         self._reset_shutdown()
         self.controller.submit("stop")
 
     def apply_usb(self):
+        if self.http_busy:
+            self.error("配置请求正在进行，请等待完成后再更改 USB 连接")
+            return
         try:
             app = self.controller.snapshot()[0]
             # USB edits do not require unapplied network/COM edits to be valid.
             values = vars(copy.deepcopy(app.args)) if app else {
-                "device": "c5", "mode": "tcp-server", "com": self.local.get("com") or "diagnostics-only"}
+                "device": "c5", "mode": "tcp-server", "com": "diagnostics-only"}
             values.update(self.usb_form.values())
             if self.network.get("device") != "c5":
                 raise ValueError("请切换到 C5 设备后设置 USB 诊断；停止按钮也可关闭已运行的诊断")
             args = settings_to_args(values)
-            self.controller.submit("usb", args)
+            if not self.controller.submit("usb", args):
+                raise ValueError("连接操作正在进行，请稍后再试")
+            return True
         except ValueError as exc:
             self.error(exc)
+
+    def connect_c5_usb(self):
+        if not self.usb_form.get("usb_port").strip():
+            self.error("请先选择 C5 原生 USB COM")
+            return
+        if self.apply_usb():
+            self.c5_status.set("正在连接 USB；连接后点击“读取 C5”。无需连接 Wi-Fi 或启动业务桥接。")
+
+    def _config_client(self):
+        if self.config_transport.get() == "USB":
+            monitor = self.controller.snapshot()[1]
+            if not monitor or monitor.port.casefold() != self.usb_form.get("usb_port").strip().casefold():
+                raise ConfigError("请先连接所选 USB COM，再读取 C5")
+            return C5USBClient(monitor)
+        return C5Client(self.config_url.get())
 
     def show_reset(self):
         app = self.controller.snapshot()[0]
@@ -494,7 +545,7 @@ class BridgeGUI:
     def _http(self, action, patch=None):
         if self.http_busy or self.network.get("device") != "c5":
             return
-        client = C5Client(self.config_url.get())
+        client = self._config_client()
         if action == "read":
             self.baseline = self.read_identity = None
         self.http_busy = True
@@ -547,8 +598,8 @@ class BridgeGUI:
 
     def save_c5(self):
         try:
-            if self.baseline is None or self.read_identity != C5Client(self.config_url.get()).identity:
-                raise ConfigError("请先从当前配置地址读取 C5，之后才能保存")
+            if self.baseline is None or self.read_identity != self._config_client().identity:
+                raise ConfigError("请先从当前 USB 连接或配置地址读取 C5，之后才能保存")
             passwords = {"ap": self.c5_forms["ap"].get("ap_password"),
                          **{name: self.c5_forms[name].get("password") for name in ("pc", "shared")}}
             clear = [name for name in ("pc", "shared") if self.c5_forms[name].get("clear_password")]
@@ -598,7 +649,7 @@ class BridgeGUI:
         self.http_busy = False
         if error:
             self.c5_status.set(str(error))
-            if isinstance(error, SaveOutcomeUnknown):
+            if isinstance(error, SaveOutcomeUnknown) or identity[0] == "usb":
                 self.baseline = self.read_identity = None
         elif action == "read":
             self.baseline = document
@@ -607,7 +658,7 @@ class BridgeGUI:
             self.c5_status.set(f"已读取启动配置 · 来源 {document['config_source']} · {time.strftime('%H:%M:%S')}；修改后需明确保存")
         else:
             self.baseline = self.read_identity = None
-            self.c5_status.set("已写入 NVS，C5 即将重启；恢复业务网络后重新连接。需核对时再次进入配置热点读取。")
+            self.c5_status.set("已写入 NVS，C5 即将重启；USB 等待重连后再读取核对，HTTP 需重新进入配置热点。")
         self._c5_enable()
 
     def clear_logs(self):
@@ -654,15 +705,15 @@ class BridgeGUI:
         if self.reset_panel and (not app or self.reset_panel.app is not app):
             self._reset_shutdown()
         self.status.set(state)
-        self.start_button.configure(state="normal" if not busy and not app else "disabled")
-        self.stop_button.configure(state="normal" if not busy and (app or usb) else "disabled")
-        self.restart_button.configure(state="normal" if not busy and app else "disabled")
+        self.start_button.configure(state="normal" if not busy and not self.http_busy and not app else "disabled")
+        self.stop_button.configure(state="normal" if not busy and not self.http_busy and (app or usb) else "disabled")
+        self.restart_button.configure(state="normal" if not busy and not self.http_busy and app else "disabled")
         self.reset_button.configure(state="normal" if app and not busy and not app.args.no_reset_ui else "disabled")
         try:
             edited = vars(settings_to_args(self.settings()))
             if running:
                 # Display refresh and the HTTP endpoint are applied immediately in the UI.
-                for key in ("stats_interval", "config_url"):
+                for key in ("stats_interval", "config_url", "config_transport"):
                     running[key] = edited[key]
             self.applied.set("参数已应用" if running == edited else "参数未应用" if app else "未启动")
         except ValueError:

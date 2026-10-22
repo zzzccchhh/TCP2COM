@@ -933,6 +933,7 @@ def build_parser(parser_class=argparse.ArgumentParser):
     parser.add_argument("--usb-log", help="USB 文本日志文件，追加保存")
     parser.add_argument("--open-config", action="store_true", help="仅打开 C5 配网页面后退出；需先手动进入配置热点")
     parser.add_argument("--config-url", default="http://192.168.4.1/", help="C5 配网页面地址")
+    parser.add_argument("--config-transport", choices=("http", "usb"), default="http", help="GUI 的 C5 配置连接方式")
     parser.add_argument("--host", help="TCP 客户端/UDP 的对端地址；TCP 服务端可选的来源 IP 筛选")
     parser.add_argument("--port", type=int, default=8080, help="TCP 客户端目标端口；TCP 服务端/UDP 本地监听端口")
     parser.add_argument("--control-port", type=int, default=8081, help="ESP 独立复位控制端口")

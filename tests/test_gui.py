@@ -20,10 +20,12 @@ except ImportError:
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from c5_config import C5Client, SaveOutcomeUnknown, public_config
+from c5_usb_config import C5USBClient
 from gui_support import BridgeController, EventUI, load_profile, save_profile, settings_to_args
 if tk is not None:
     from tcp2com_gui import BridgeGUI
 from test_c5_config import SetupHandler, example_config
+from test_usb_config import SerialC5
 
 
 def wait_for(predicate, update=None, timeout=4):
@@ -305,6 +307,86 @@ class GUITests(unittest.TestCase):
         error.assert_not_called()
         wait_for(lambda: not self.gui.controller.snapshot()[4], self.root.update)
         self.assertIsNotNone(self.gui.controller.snapshot()[1])
+
+    def connect_usb_fixture(self, device=None):
+        device = device or SerialC5()
+        patch = mock.patch("usb_diagnostics.serial.serial_for_url", return_value=device)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.gui.config_transport.set("USB")
+        self.gui.usb_form.set("usb_port", "COM8")
+        self.gui.connect_c5_usb()
+        wait_for(lambda: self.gui.controller.snapshot()[1] is not None
+                 and self.gui.controller.snapshot()[1].status()["connected"], self.root.update)
+        return device
+
+    def test_usb_only_configuration_ignores_payload_settings_and_saves(self):
+        self.gui.network.set("port", "invalid")
+        self.gui.local.set("com", "COM8")  # not actually open: must not block USB-only setup
+        device = self.connect_usb_fixture()
+        self.gui.read_c5()
+        wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        self.assertIsNone(self.gui.controller.snapshot()[0])
+        self.assertEqual(self.gui.read_identity[0], "usb")
+        self.assertEqual(str(self.gui.url_entry["state"]), "disabled")
+        self.gui.c5_forms["common"].set("baud", "921600")
+        with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True):
+            self.gui.save_c5()
+        wait_for(lambda: "已写入 NVS" in self.gui.c5_status.get(), self.root.update)
+        self.assertEqual(device.requests[-1]["patch"], {"baud": 921600})
+        self.assertIsNone(self.gui.baseline)
+
+    def test_usb_selection_or_transport_change_requires_another_read(self):
+        self.connect_usb_fixture()
+        self.gui.read_c5()
+        wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        for change in (lambda: self.gui.usb_form.set("usb_port", "COM9"),
+                       lambda: self.gui.config_transport.set("Wi-Fi HTTP")):
+            change()
+            with mock.patch.object(self.gui, "error") as error, mock.patch.object(self.gui, "_http") as send:
+                self.gui.save_c5()
+            self.assertIn("读取", str(error.call_args))
+            send.assert_not_called()
+
+    def test_usb_save_timeout_invalidates_read_without_replaying(self):
+        device = self.connect_usb_fixture()
+        self.gui.read_c5()
+        wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        self.gui.c5_forms["ap"].set("ap_password", "private-gui-secret")
+        device.drop = "save"
+        with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True), \
+                mock.patch("tcp2com_gui.C5USBClient", side_effect=lambda m: C5USBClient(m, timeout=.1)):
+            self.gui.save_c5()
+        wait_for(lambda: "待确认" in self.gui.c5_status.get(), self.root.update)
+        self.assertIsNone(self.gui.baseline)
+        self.assertEqual(device.save_count, 1)
+        self.assertEqual(self.gui.c5_forms["ap"].get("ap_password"), "")
+
+    def test_pending_configuration_prevents_usb_replacement_and_closes_cleanly(self):
+        device = self.connect_usb_fixture()
+        device.drop = "hello"
+        self.gui.read_c5()
+        wait_for(lambda: device.requests, self.root.update)
+        original = self.gui.controller.snapshot()[1]
+        with mock.patch.object(self.gui, "error") as error:
+            self.gui.apply_usb()
+            self.gui.start("start")
+            self.gui.stop()
+        self.assertEqual(error.call_count, 3)
+        self.assertIs(original, self.gui.controller.snapshot()[1])
+        self.gui.close()
+        wait_for(lambda: self.gui.destroyed, self.root.update)
+        self.assertFalse(original.thread.is_alive())
+
+    def test_usb_transport_profile_roundtrip_without_device_write(self):
+        self.gui.config_transport.set("USB")
+        self.gui.usb_form.set("usb_port", "COM8")
+        self.gui.save_profile()
+        self.gui.config_transport.set("Wi-Fi HTTP")
+        self.gui.load_profile()
+        self.assertEqual(self.gui.config_transport.get(), "USB")
+        self.assertEqual(self.gui.usb_form.get("usb_port"), "COM8")
+        self.assertIsNone(self.gui.controller.snapshot()[1])
 
     def test_close_waits_for_inflight_http_without_worker_holding_tk(self):
         entered, release = threading.Event(), threading.Event()
