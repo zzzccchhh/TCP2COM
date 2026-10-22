@@ -267,7 +267,7 @@ class BridgeGUI:
             button = ttk.Button(toolbar, text=text, command=callback)
             button.pack(side="left", padx=2)
             self.c5_buttons.append(button)
-        ttk.Label(self.c5_frame, text="USB：只接 Type-C，选 COM 并连接后读取，无需启动业务桥接。Wi-Fi：长按 GPIO24 ≥3 秒后松开，连接 ESP32-C5-Setup。",
+        ttk.Label(self.c5_frame, text="先长按 GPIO24 ≥3 秒后松开进入配网。USB：Type-C 连接后读取，无需连接 Wi-Fi 或启动桥接。HTTP：连接 ESP32-C5-Setup。",
                   wraplength=1000).pack(anchor="w", pady=(8, 2))
         ttk.Label(self.c5_frame, textvariable=self.c5_status, foreground="#1d4ed8", wraplength=1000).pack(anchor="w", pady=4)
         ttk.Label(self.c5_frame, textvariable=self.usb_status, wraplength=1000).pack(anchor="w")
@@ -518,7 +518,7 @@ class BridgeGUI:
             self.error("请先选择 C5 原生 USB COM")
             return
         if self.apply_usb():
-            self.c5_status.set("正在连接 USB；连接后点击“读取 C5”。无需连接 Wi-Fi 或启动业务桥接。")
+            self.c5_status.set("正在连接 USB；请先长按 GPIO24 ≥3 秒后松开进入配网，再点击“读取 C5”。无需连接 Wi-Fi 或启动桥接。")
 
     def _config_client(self):
         if self.config_transport.get() == "USB":
@@ -658,7 +658,7 @@ class BridgeGUI:
             self.c5_status.set(f"已读取启动配置 · 来源 {document['config_source']} · {time.strftime('%H:%M:%S')}；修改后需明确保存")
         else:
             self.baseline = self.read_identity = None
-            self.c5_status.set("已写入 NVS，C5 即将重启；USB 等待重连后再读取核对，HTTP 需重新进入配置热点。")
+            self.c5_status.set("已写入 NVS，C5 即将重启；USB / HTTP 均需重新进入配网，再读取核对。普通模式 USB 只输出日志。")
         self._c5_enable()
 
     def clear_logs(self):

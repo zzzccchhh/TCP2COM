@@ -362,6 +362,30 @@ class GUITests(unittest.TestCase):
         self.assertEqual(device.save_count, 1)
         self.assertEqual(self.gui.c5_forms["ap"].get("ap_password"), "")
 
+    def test_usb_normal_mode_read_prompts_setup_without_enabling_save(self):
+        device = SerialC5()
+        device.setup = False
+        self.connect_usb_fixture(device)
+        with mock.patch("tcp2com_gui.C5USBClient", side_effect=lambda m: C5USBClient(m, timeout=.1)):
+            self.gui.read_c5()
+        wait_for(lambda: "超时" in self.gui.c5_status.get(), self.root.update)
+        self.assertIn("配网", self.gui.c5_status.get())
+        self.assertIsNone(self.gui.baseline)
+        self.assertEqual(device.save_count, 0)
+
+    def test_usb_setup_reentry_invalidates_gui_read_before_saving(self):
+        device = self.connect_usb_fixture()
+        self.gui.read_c5()
+        wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        device.session += 1
+        self.gui.c5_forms["common"].set("baud", "921600")
+        with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True):
+            self.gui.save_c5()
+        wait_for(lambda: "会话" in self.gui.c5_status.get(), self.root.update)
+        self.assertIsNone(self.gui.baseline)
+        self.assertEqual(device.save_count, 0)
+        self.assertNotIn("save", [r["op"] for r in device.requests])
+
     def test_pending_configuration_prevents_usb_replacement_and_closes_cleanly(self):
         device = self.connect_usb_fixture()
         device.drop = "hello"

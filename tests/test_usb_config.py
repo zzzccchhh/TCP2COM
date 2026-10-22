@@ -30,6 +30,9 @@ class SerialC5:
     def __init__(self):
         self.incoming = queue.Queue()
         self.boot = "0123456789abcdef"
+        self.session = 1
+        self.setup = True
+        self.exit_after_validate = False
         self.config = example_config()
         self.requests = []
         self.writes = []
@@ -82,20 +85,24 @@ class SerialC5:
         request = json.loads(packet.strip()[6:])
         self.requests.append(request)
         operation = request["op"]
-        response = {"v": 1, "id": request["id"], "boot": self.boot, "ok": True}
+        if not self.setup:
+            return len(packet)
+        response = {"v": 2, "id": request["id"], "boot": self.boot, "session": self.session, "ok": True}
         if operation == "hello":
-            result = {"device": "ESP32-C5", "protocol": 1}
+            result = {"device": "ESP32-C5", "protocol": 2}
         elif operation == "read":
             result = copy.deepcopy(self.config)
         else:
             result = {"valid": True} if operation == "validate" else {"saved": True, "restart": True}
-            if request.get("boot") != self.boot:
+            if request.get("boot") != self.boot or request.get("session") != self.session:
                 response.update(ok=False, code="stale")
             elif self.saving:
                 response.update(ok=False, code="busy")
             elif operation == "save":
                 self.save_count += 1
                 self.saving = True
+            elif operation == "validate" and self.exit_after_validate:
+                self.setup = False
         response["result"] = result
         if self.bad and (self.bad_operation is None or self.bad_operation == operation):
             response.update(self.bad)
@@ -174,7 +181,7 @@ class USBConfigTests(unittest.TestCase):
 
     def test_unconfirmed_or_invalid_save_replies_are_unknown(self):
         for bad in ({"result": {}}, {"result": {"saved": True, "restart": False}},
-                    {"ok": False, "code": "memory"}, {"v": 2}):
+                    {"ok": False, "code": "memory"}, {"v": 1}):
             with self.subTest(reply=bad):
                 self.device.bad = None
                 self.device.saving = False
@@ -194,6 +201,45 @@ class USBConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "重启"):
             client.save({"baud": 921600})
         self.assertNotEqual(old, self.monitor.config_identity())
+        self.assertEqual(self.device.save_count, 0)
+
+    def test_normal_mode_is_silent_and_timeout_explains_setup(self):
+        self.device.setup = False
+        for operation in ("hello", "read", "validate", "save"):
+            with self.subTest(operation=operation):
+                error = SaveOutcomeUnknown if operation == "save" else ConfigError
+                with self.assertRaises(error) as caught:
+                    self.monitor.request(operation, {"baud": 921600} if operation in ("save", "validate") else None,
+                                         boot=self.device.boot, session=1, timeout=.06)
+                if operation != "save":
+                    self.assertIn("配网", str(caught.exception))
+        self.assertEqual(self.device.save_count, 0)
+        self.assertIsNone(self.monitor.boot)
+        self.assertIsNone(self.monitor.session)
+        self.device.setup = True
+        self.assertEqual(C5USBClient(self.monitor, timeout=.3).read(), example_config())
+        self.assertEqual(self.device.save_count, 0)  # Nothing replayed on mode entry.
+
+    def test_setup_reentry_in_same_boot_invalidates_old_read(self):
+        client = C5USBClient(self.monitor, timeout=.2)
+        client.read()
+        self.device.session += 1
+        with self.assertRaisesRegex(ConfigError, "会话"):
+            client.save({"baud": 921600})
+        self.assertEqual(self.device.save_count, 0)
+        client.read()
+        self.assertTrue(client.save({"baud": 921600})["saved"])
+
+    def test_setup_exit_between_validation_and_save_never_commits(self):
+        client = C5USBClient(self.monitor, timeout=.1)
+        client.read()
+        self.device.exit_after_validate = True
+        with self.assertRaises(SaveOutcomeUnknown):
+            client.save({"baud": 921600})
+        self.assertEqual(self.device.save_count, 0)
+        self.device.setup = True
+        self.device.session += 1
+        client.read()
         self.assertEqual(self.device.save_count, 0)
 
     def test_disconnect_cancels_waiter_and_stale_generation_never_writes(self):

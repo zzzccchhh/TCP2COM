@@ -38,6 +38,7 @@ class USBMonitor:
         self.updated_at = None
         self.generation = None
         self.boot = None
+        self.session = None
         self.pending = None
         self.request_lock = threading.Lock()
 
@@ -58,13 +59,15 @@ class USBMonitor:
         with self.lock:
             if not self.connected or self.stop_event.is_set():
                 raise ConfigError("USB 未连接；选择 C5 原生 USB COM，点击连接后再读取")
-            return ("usb", self.port.casefold(), self.generation, self.boot)
+            return ("usb", self.port.casefold(), self.generation, self.boot, self.session)
 
-    def request(self, operation, patch=None, boot=None, generation=None, timeout=4):
+    def request(self, operation, patch=None, boot=None, generation=None, session=None, timeout=4):
         """Only the USB worker touches the handle; never replay a queued write."""
         with self.request_lock:
             request_id = uuid.uuid4().hex
-            envelope = {"v": 1, "id": request_id, "op": operation}
+            envelope = {"v": 2, "id": request_id, "op": operation}
+            if session is not None:
+                envelope["session"] = session
             if patch is not None:
                 encoded = json.dumps(patch, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
                 if len(encoded) > 2048:
@@ -88,7 +91,7 @@ class USBMonitor:
                     if response is None or request["failed"]:
                         if operation == "save" and request["sent"]:
                             raise SaveOutcomeUnknown("保存结果待确认：USB 超时或断开，请重连后读取核对，勿直接重发")
-                        raise ConfigError("USB 请求超时或断开；请检查 COM、固件版本及其他程序是否占用端口")
+                        raise ConfigError("USB 请求超时或断开；请先长按 GPIO24 ≥3 秒后松开进入配网，并检查 COM、固件版本和端口占用")
                     return response
             finally:
                 with self.lock:
@@ -115,7 +118,8 @@ class USBMonitor:
         # Never put protocol packets (including malformed/echoed requests) in logs.
         try:
             frame = json.loads(raw[len(PREFIX):].decode("utf-8"), object_pairs_hook=_unique_object)
-            if (not isinstance(frame, dict) or type(frame.get("v")) is not int or frame["v"] != 1
+            if (not isinstance(frame, dict) or type(frame.get("v")) is not int or frame["v"] != 2
+                    or type(frame.get("session")) is not int or not 1 <= frame["session"] <= 0xffffffff
                     or type(frame.get("ok")) is not bool or not isinstance(frame.get("boot"), str)
                     or not re.fullmatch(r"[0-9a-f]{16}", frame["boot"])):
                 return True
@@ -125,6 +129,7 @@ class USBMonitor:
             request = self.pending
             if request and request["sent"] and frame.get("id") == request["id"]:
                 self.boot = frame["boot"]
+                self.session = frame["session"]
                 request["reply"] = frame
                 request["event"].set()
         return True
@@ -133,6 +138,7 @@ class USBMonitor:
         with self.lock:
             self.connected = False
             self.boot = None
+            self.session = None
             if self.pending:
                 self.pending["failed"] = True
                 self.pending["event"].set()
@@ -156,6 +162,7 @@ class USBMonitor:
                         self.connected = True
                         self.generation = uuid.uuid4().hex
                         self.boot = None
+                        self.session = None
                     self.notify(f"USB 日志 / 配置已连接：{self.port}")
                     pending = bytearray()
                     discard = False
