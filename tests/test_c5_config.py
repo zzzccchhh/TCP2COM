@@ -76,10 +76,16 @@ class ConfigModelTests(unittest.TestCase):
     def test_static_network_mask_gateway_and_dhcp_reservation(self):
         base = example_config()
         for patch in ({"ap_ip": "127.0.0.1"}, {"ap_netmask": "255.0.255.0"},
+                      {"ap_ip": "192.168.004.1"}, {"ap_gateway": "192.168.008.1"},
                       {"ap_gateway": "192.168.5.1"}, {"ap_ip": "192.168.4.0"},
                       {"ap_netmask": "255.255.255.252"}):
             with self.subTest(patch=patch), self.assertRaises(ConfigError):
                 public_config({**base, **patch})
+        edited = copy.deepcopy(base)
+        for octet in ("008", "010"):
+            edited["pc"].update(ip=f"192.168.{octet}.200", gateway=f"192.168.{octet}.1", dns=f"192.168.{octet}.1")
+            with self.assertRaises(ConfigError):
+                public_config(edited)
         edited = copy.deepcopy(base)
         edited["pc"]["gateway"] = edited["pc"]["ip"]
         with self.assertRaises(ConfigError):
@@ -111,6 +117,12 @@ class SetupHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         self.server.received.append((self.path, self.headers.get("Content-Type"), json.loads(raw)))
+        self.server.tokens.append(self.headers.get("X-C5-Session"))
+        if self.server.tokens[-1] != self.server.token:
+            self.send_response(503)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         self.respond()
 
     def respond(self):
@@ -134,7 +146,9 @@ class ConfigHTTPTests(unittest.TestCase):
     def setUp(self):
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SetupHandler)
         self.server.status = 200
-        self.server.body = json.dumps(example_config(), ensure_ascii=False).encode()
+        self.server.token = "0123456789abcdef-1"
+        self.server.tokens = []
+        self.server.body = json.dumps({**example_config(), "http_session": self.server.token}, ensure_ascii=False).encode()
         self.server.received = []
         self.server.requests = 0
         self.server.delay = 0
@@ -142,6 +156,7 @@ class ConfigHTTPTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": .02}, daemon=True)
         self.thread.start()
         self.client = C5Client(f"http://127.0.0.1:{self.server.server_port}/", timeout=.3)
+        self.client.bind_session(self.server.token)
 
     def tearDown(self):
         self.server.shutdown()
@@ -153,6 +168,29 @@ class ConfigHTTPTests(unittest.TestCase):
         self.server.body = b'{"saved":true,"restart":true}'
         self.client.save({"pc": {"password": "private-new"}})
         self.assertEqual(self.server.received, [("/api/config", "application/json", {"pc": {"password": "private-new"}})])
+        self.assertEqual(self.server.tokens, [self.server.token])
+
+    def test_save_requires_read_identity_and_rejects_old_setup_or_boot(self):
+        fresh = C5Client(f"http://127.0.0.1:{self.server.server_port}/")
+        with self.assertRaisesRegex(ConfigError, "先.*读取"):
+            fresh.save({"mode": 1})
+        self.assertEqual(self.server.requests, 0)
+        old = self.client.identity
+        for token in ("0123456789abcdef-2", "fedcba9876543210-1"):
+            self.server.token = token
+            with self.assertRaisesRegex(ConfigError, "会话已失效") as caught:
+                self.client.save({"mode": 1})
+            self.assertNotIsInstance(caught.exception, SaveOutcomeUnknown)
+            self.server.body = json.dumps({**example_config(), "http_session": token}).encode()
+            self.client.read()
+            self.assertNotEqual(old, self.client.identity)
+            old = self.client.identity
+
+    def test_read_rejects_missing_identity_and_clears_previous_binding(self):
+        self.server.body = json.dumps(example_config()).encode()
+        with self.assertRaisesRegex(ConfigError, "会话"):
+            self.client.read()
+        self.assertIsNone(self.client.http_session)
 
     def test_403_and_503_have_actionable_explanations_and_no_retry(self):
         for status, hint in ((403, "GPIO24"), (503, "重启")):

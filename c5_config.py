@@ -4,6 +4,7 @@ import copy
 import http.client
 import ipaddress
 import json
+import re
 from urllib.parse import urlsplit
 
 from bridge_settings import _unique_object
@@ -43,11 +44,11 @@ def _text(value, label, maximum, minimum=0):
 
 def _address(value):
     try:
-        # Firmware accepts decimal octets with leading zeros.
         if not isinstance(value, str) or len(value) > 15:
             raise ValueError
         parts = value.split(".")
-        if len(parts) != 4 or any(not p.isascii() or not p.isdigit() or len(p) > 3 for p in parts):
+        if len(parts) != 4 or any(not p.isascii() or not p.isdigit() or len(p) > 3
+                                 or (len(p) > 1 and p[0] == "0") for p in parts):
             raise ValueError
         return int(ipaddress.IPv4Address(".".join(str(int(p)) for p in parts)))
     except ValueError as exc:
@@ -146,6 +147,13 @@ class C5Client:
             raise ConfigError("配置地址端口无效") from exc
         self.timeout = timeout
         self.identity = (self.scheme, self.host.casefold(), self.port)
+        self.http_session = None
+
+    def bind_session(self, token):
+        if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{16}-[1-9][0-9]{0,9}", token):
+            raise ConfigError("缺少有效的 HTTP 配网会话，请更新固件并重新读取")
+        self.http_session = token
+        self.identity = self.identity[:3] + (token,)
 
     def _request(self, method, patch=None):
         cls = http.client.HTTPSConnection if self.scheme == "https" else http.client.HTTPConnection
@@ -157,13 +165,15 @@ class C5Client:
             if body is not None and not 1 <= len(body) <= 2048:
                 raise ConfigError("请求体必须为 1～2048 字节")
             sent = method == "POST"
-            connection.request(method, "/api/config", body=body,
-                               headers={"Content-Type": "application/json", "Connection": "close"})
+            headers = {"Content-Type": "application/json", "Connection": "close"}
+            if method == "POST":
+                headers["X-C5-Session"] = self.http_session
+            connection.request(method, "/api/config", body=body, headers=headers)
             response = connection.getresponse()
             if response.status == 403:
                 raise ConfigError("403：长按 GPIO24 至少 3 秒后松开，连接 ESP32-C5-Setup，再读取配置")
             if response.status == 503:
-                raise ConfigError("503：设备正在重启，请等待后重新进入配置热点读取")
+                raise ConfigError("503：配网会话已失效或设备正在重启，请重新进入配网并读取")
             if response.status != 200:
                 # Do not echo device bodies: they could contain submitted credentials.
                 if method == "POST" and response.status >= 500:
@@ -186,12 +196,17 @@ class C5Client:
             connection.close()
 
     def read(self):
+        self.http_session = None
+        self.identity = self.identity[:3]
         document = self._request("GET")
         result = public_config(document)
+        self.bind_session(document.get("http_session"))
         result["config_source"] = str(document.get("config_source", "unknown"))
         return result
 
     def save(self, patch):
+        if self.http_session is None:
+            raise ConfigError("请先从当前设备读取配置，再保存")
         result = self._request("POST", patch)
         if result.get("saved") is not True or result.get("restart") is not True:
             raise SaveOutcomeUnknown("保存结果待确认：未收到 saved/restart 确认，请重新进入配置热点读取")

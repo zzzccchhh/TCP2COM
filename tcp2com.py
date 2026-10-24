@@ -376,6 +376,8 @@ class App:
         self.pressure_lock = threading.Lock()
         self.pressure_active = {"tcp_to_com": False, "com_to_tcp": False}
         self.pressure_warn_time = {"tcp_to_com": 0.0, "com_to_tcp": 0.0}
+        self.serial_reader_ready = threading.Condition()
+        self.serial_reader_generation = 0
 
     def start(self) -> bool:
         try:
@@ -654,7 +656,28 @@ class App:
             # 清理断线期间或上次会话遗留数据，再安装新连接代次。
             self._clear_old_queue(self.q_tcp_to_com, "tcp_to_com_drop", "重连前 TCP→串口队列")
             self._clear_old_queue(self.q_com_to_tcp, "com_to_tcp_drop", "重连前串口→TCP队列")
+            if self.ser:
+                try:
+                    buffered = self.ser.in_waiting
+                    self.ser.reset_input_buffer()
+                    self.stats.add("com_to_tcp_drop", buffered)
+                except (serial.SerialException, OSError) as exc:
+                    close_socket(sock)
+                    if self.server:
+                        self.server.release(sock)
+                    self.ui.message(f"串口会话隔离失败：{exc}，桥接将退出")
+                    self.exit_code = 1
+                    self.close_event.set()
+                    break
             generation = self.conn.set(sock)
+            if self.ser:
+                # Do not forward the new peer's bytes until RX has finished
+                # any old blocking read and armed a read for this generation.
+                # This preserves the first loopback reply after reconnect.
+                with self.serial_reader_ready:
+                    while (self.serial_reader_generation != generation and
+                           self.conn.is_current(sock, generation) and not self.close_event.is_set()):
+                        self.serial_reader_ready.wait(.05)
             announced_wait = False
             self.ui.state("connected", f"{'UDP 已绑定，固定对端' if self.udp else 'TCP 已连接'} {peer[0]}:{peer[1]}")
             reason = "连接结束"
@@ -807,6 +830,10 @@ class App:
     def _serial_read_worker(self) -> None:
         while not self.close_event.is_set():
             try:
+                with self.serial_reader_ready:
+                    read_sock, read_generation = self.conn.snapshot()
+                    self.serial_reader_generation = read_generation if read_sock else 0
+                    self.serial_reader_ready.notify_all()
                 data = self.ser.read(self.args.bufsize)
             except (serial.SerialException, OSError) as exc:
                 if not self.close_event.is_set():
@@ -820,7 +847,7 @@ class App:
                 continue
 
             sock, generation = self.conn.snapshot()
-            if sock is None:
+            if sock is None or read_sock is None or generation != read_generation:
                 self.stats.add("com_to_tcp_drop", len(data))
                 continue
 

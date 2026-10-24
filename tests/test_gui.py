@@ -175,7 +175,9 @@ class GUITests(unittest.TestCase):
     def read_fixture(self):
         config = example_config()
         self.gui.baseline = config
-        self.gui.read_identity = C5Client(self.gui.config_url.get()).identity
+        client = C5Client(self.gui.config_url.get())
+        client.bind_session("0123456789abcdef-1")
+        self.gui.read_identity = client.identity
         self.gui._fill_c5(config)
         self.gui._c5_enable()
         return config
@@ -269,7 +271,9 @@ class GUITests(unittest.TestCase):
     def test_real_setup_api_read_save_and_restart_confirmation(self):
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SetupHandler)
         server.status, server.delay, server.drop = 200, 0, False
-        server.body = json.dumps(example_config()).encode()
+        server.token = "0123456789abcdef-1"
+        server.tokens = []
+        server.body = json.dumps({**example_config(), "http_session": server.token}).encode()
         server.received, server.requests = [], 0
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": .02}, daemon=True)
         thread.start()
@@ -284,6 +288,7 @@ class GUITests(unittest.TestCase):
             wait_for(lambda: "已写入 NVS" in self.gui.c5_status.get(), self.root.update)
             self.assertIsNone(self.gui.baseline)
             self.assertEqual(server.received, [("/api/config", "application/json", {"mode": 2})])
+            self.assertEqual(server.tokens, [server.token])
         finally:
             server.shutdown()
             server.server_close()

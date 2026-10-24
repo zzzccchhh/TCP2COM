@@ -71,3 +71,9 @@ tcp2com 原 ESP-01S 协议与操作说明
 软件验证（从仓库根目录执行）：
   py -3 -m unittest discover -s tcp2com_bundle/tests -v
   固件控制状态机的主机测试与运行命令见 esp01s/test/test_remote_reset_host/README.md。
+
+2026-10-22 审查修复：
+  C5 HTTP 配置需先读取 http_session，保存携带 X-C5-Session；重启或配网重入后须重新读取。
+  IPv4 各段不接受前导零。串口旧数据不跨连接，USB 会话/丢弃/队列峰值分别显示。
+  SPI 无损流控需同时更新 C5 并接入 CH32 适配层，见 D:/ESP/ESP-C5-WFI/compat/README.md。
+  完整操作以本目录 README.md 为准。

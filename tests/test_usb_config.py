@@ -109,7 +109,7 @@ class SerialC5:
         if self.drop != operation:
             # Stale replies and stats must not satisfy the active request.
             stale = {**response, "id": "old-request"}
-            content = (b"I (1) stats: RSSI=-42\nC5CFG " + json.dumps(stale).encode() + b"\nC5CFG "
+            content = (b"I (1) stats: IP=192.168.4.1 ch=6 RSSI=-42 session=1\nC5CFG " + json.dumps(stale).encode() + b"\nC5CFG "
                        + json.dumps(response, ensure_ascii=False).encode() + b"\r\n")
             self.inject(content)
         return len(packet)

@@ -15,12 +15,34 @@ PREFIX = b"C5CFG "
 
 
 def parse_stats(line):
-    """Keep original lines; unknown/new fields never interrupt log collection."""
+    """Parse each firmware record independently so repeated names cannot collide."""
     if "stats:" not in line:
         return {}
+    record = line.split("stats:", 1)[1].strip()
+    if record.startswith("IP="):
+        names = {"IP": "IP", "ch": "ch", "RSSI": "RSSI", "session": "session",
+                 "local->net": "rate.local_to_net", "net->local": "rate.net_to_local"}
+        return {names[key]: value for key, value in re.findall(
+            r"(?:^|\s)(IP|ch|RSSI|session|local->net|net->local)=([^\s]+)", record)}
+    patterns = (
+        (r"^queues local->net=(\S+) peak=(\d+) net->local=(\S+) peak=(\d+)$",
+         ("queue.local_to_net", "queue.local_to_net.peak", "queue.net_to_local", "queue.net_to_local.peak")),
+        (r"^drops offline=(\d+) stage=(\d+) full=(\d+) session=(\d+) uart_errors=(\d+)$",
+         ("drops.offline", "drops.stage", "drops.full", "drops.session", "drops.uart_errors")),
+        (r"^link=(\S+) SPI rx/tx=(\d+)/(\d+) protocol_errors=(\d+)(?: .*)?$",
+         ("link", "spi.rx", "spi.tx", "protocol_errors")),
+        (r"^totals UART rx/tx=(\d+)/(\d+) TCP rx/tx=(\d+)/(\d+)$",
+         ("uart.rx", "uart.tx", "network.rx", "network.tx")),
+        (r"^UART backlog equivalent=(\d+)/(\d+) ms$", ("backlog.local_to_net_ms", "backlog.net_to_local_ms")),
+        (r"^internal free/min=(\d+)/(\d+) PSRAM free=(\d+) stacks free RX/TX/TCP=(\d+)/(\d+)/(\d+) bytes$",
+         ("heap.internal.free", "heap.internal.min", "heap.psram.free", "stack.rx", "stack.tx", "stack.tcp")),
+    )
     fields = {}
-    for key, value in re.findall(r"([A-Za-z_][A-Za-z_0-9/ .>\-]*?)=([^\s]+)", line.split("stats:", 1)[1]):
-        fields[key.strip()] = value
+    for pattern, names in patterns:
+        match = re.fullmatch(pattern, record)
+        if match:
+            fields = {key: value for key, value in zip(names, match.groups()) if value is not None}
+            break
     return fields
 
 

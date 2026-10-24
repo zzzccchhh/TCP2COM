@@ -110,6 +110,55 @@ class SettingsTests(unittest.TestCase):
 
 
 class BridgeTests(unittest.TestCase):
+    def test_new_peer_waits_for_old_read_before_forwarding_first_packet(self):
+        args = tcp2com.parse_args(["--device", "c5", "--mode", "tcp-server", "--listen", "127.0.0.1",
+                                  "--port", str(free_port()), "--com", "loop://", "--timeout", ".01"])
+        device = tcp2com.serial.serial_for_url("loop://", timeout=.01, write_timeout=.5)
+        self.addCleanup(device.close)
+        entered, release, wrote = threading.Event(), threading.Event(), threading.Event()
+        read, write = device.read, device.write
+        def held_read(size):
+            if not entered.is_set():
+                entered.set()
+                release.wait(2)
+                return b"old-offline-bytes"
+            return read(size)
+        def observed_write(data):
+            wrote.set()
+            return write(data)
+        device.read, device.write = held_read, observed_write
+        app = tcp2com.App(args, QuietUI())
+        self.addCleanup(app.stop)
+        self.addCleanup(release.set)
+        with mock.patch("tcp2com.serial.serial_for_url", return_value=device):
+            self.assertTrue(app.start())
+        self.assertTrue(entered.wait(1))
+        with socket.create_connection(app.server.address, timeout=2) as peer:
+            peer.settimeout(2)
+            peer.sendall(b"first-new-packet")
+            wait_for(lambda: app.conn.snapshot()[0] is not None)
+            self.assertFalse(wrote.wait(.05))
+            release.set()
+            self.assertEqual(receive(peer, len(b"first-new-packet")), b"first-new-packet")
+            self.assertEqual(app.stats.snapshot()["com_to_tcp_drop"], len(b"old-offline-bytes"))
+
+    def test_serial_read_cannot_move_bytes_across_connection_boundary(self):
+        for initially_connected in (False, True):
+            with self.subTest(initially_connected=initially_connected):
+                args = tcp2com.parse_args(["--device", "c5", "--mode", "tcp-server", "--com", "loop://"])
+                app = tcp2com.App(args, QuietUI())
+                if initially_connected:
+                    app.conn.set(mock.Mock())
+                def read(_):
+                    app.conn.set(mock.Mock())
+                    app.close_event.set()
+                    return b"old-session-payload"
+                app.ser = mock.Mock()
+                app.ser.read.side_effect = read
+                app._serial_read_worker()
+                self.assertTrue(app.q_com_to_tcp.empty())
+                app.conn.close_current("test complete")
+
     def app(self, mode="tcp-server", extra=()):
         args = tcp2com.parse_args(["--device", "c5", "--mode", mode,
                                   "--listen", "127.0.0.1", "--port", str(free_port()),
@@ -294,6 +343,22 @@ class BridgeTests(unittest.TestCase):
 
 
 class USBTests(unittest.TestCase):
+    def test_multiline_stats_preserve_session_directions_and_drop_counts(self):
+        latest = {}
+        for line in (
+            "I stats: IP=192.168.4.1 ch=6 RSSI=-42 session=7 local->net=123 B/s net->local=456 B/s",
+            "I stats: queues local->net=1/4194304 peak=100 net->local=2/1048576 peak=200",
+            "I stats: drops offline=0 stage=1 full=2 session=99 uart_errors=3",
+        ):
+            latest.update(parse_stats(line))
+        self.assertEqual(latest["session"], "7")
+        self.assertEqual(latest["drops.session"], "99")
+        self.assertEqual(latest["queue.local_to_net.peak"], "100")
+        self.assertEqual(latest["queue.net_to_local.peak"], "200")
+        self.assertEqual(latest["rate.net_to_local"], "456")
+        self.assertNotIn("peak", latest)
+        self.assertEqual(parse_stats("I stats: future unknown=x"), {})
+
     def test_stats_and_unknown_lines(self):
         self.assertEqual(parse_stats("I (1) stats: IP=192.168.4.1 ch=36 RSSI=-42 session=2")["RSSI"], "-42")
         self.assertEqual(parse_stats("I startup: ready"), {})
@@ -318,7 +383,7 @@ class USBTests(unittest.TestCase):
             def read(self, _size):
                 if not self.sent:
                     self.sent = True
-                    return b"I (1) stats: RSSI=-42\n"
+                    return b"I (1) stats: IP=192.168.4.1 ch=6 RSSI=-42 session=1\n"
                 threading.Event().wait(0.01)
                 return b""
             def __enter__(self):

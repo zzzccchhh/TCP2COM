@@ -526,7 +526,11 @@ class BridgeGUI:
             if not monitor or monitor.port.casefold() != self.usb_form.get("usb_port").strip().casefold():
                 raise ConfigError("请先连接所选 USB COM，再读取 C5")
             return C5USBClient(monitor)
-        return C5Client(self.config_url.get())
+        client = C5Client(self.config_url.get())
+        identity = self.read_identity
+        if identity and len(identity) == 4 and identity[:3] == client.identity:
+            client.bind_session(identity[3])
+        return client
 
     def show_reset(self):
         app = self.controller.snapshot()[0]
@@ -649,7 +653,7 @@ class BridgeGUI:
         self.http_busy = False
         if error:
             self.c5_status.set(str(error))
-            if isinstance(error, SaveOutcomeUnknown) or identity[0] == "usb":
+            if isinstance(error, ConfigError) or identity[0] == "usb":
                 self.baseline = self.read_identity = None
         elif action == "read":
             self.baseline = document
