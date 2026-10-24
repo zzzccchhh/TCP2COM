@@ -7,6 +7,10 @@ S3 原生 USB 为 GPIO19/20，配网按键 GPIO4，长按至少 3 秒后松开�
 USB hello 按所选型号校验，S3 的读写、导入均拒绝 5 GHz/AUTO。完整操作见 readme.md。
 本文件后半部分保留 ESP-01S 8081 复位协议，C5/S3 不支持此协议。
 
+已验证配套版本：上位机 e10b605，S3 固件 73cd257；上位机基线修复为 2482aad。
+上位机 123 项回归和 C5/S3 生产解析器配对已通过；未进行实机联调。
+以下第 3、4 步为 ESP-01S 启动方式；S3 使用上面的 s3-client / 启动_S3.bat。
+
 1. 安装 Python 3。
 2. 在此目录运行：py -3 -m pip install -r requirements-tcp2com.txt
 3. 修改“启动_tcp2com.bat”中的 T2C_HOST、T2C_PORT、T2C_COM 和 T2C_BAUD。
@@ -71,12 +75,12 @@ USB hello 按所选型号校验，S3 的读写、导入均拒绝 5 GHz/AUTO。�
   控制会话最多 3 秒。数据连接使用 1ms 写等待，并在每次写入返回后处理复位计时和灯态；未写出的数据保留在环形缓存中。
   复位仍采用软件计时，系统调度会带来少量延迟；实际波形需在满速和断网情况下上板测量。
 
-软件验证（从仓库根目录执行）：
-  py -3 -m unittest discover -s tcp2com_bundle/tests -v
-  固件控制状态机的主机测试与运行命令见 esp01s/test/test_remote_reset_host/README.md。
+软件验证（从本上位机仓库根目录执行）：
+  py -3 -B -X utf8 -m unittest discover -s tests -v
+  ESP-01S 固件控制状态机测试另见 ../esp01s/test/test_remote_reset_host/README.md。
 
 2026-10-22 审查修复：
   C5 HTTP 配置需先读取 http_session，保存携带 X-C5-Session；重启或配网重入后须重新读取。
   IPv4 各段不接受前导零。串口旧数据不跨连接，USB 会话/丢弃/队列峰值分别显示。
   SPI 无损流控需同时更新 C5 并接入 CH32 适配层，见 D:/ESP/ESP-C5-WFI/compat/README.md。
-  完整操作以本目录 README.md 为准。
+  完整操作以本目录 readme.md 为准；S3 使用其专用适配文件，不复用 C5 适配文件。
