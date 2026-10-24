@@ -27,7 +27,8 @@ def wait_for(predicate, timeout=3):
 
 class SerialC5:
     """Fragment replies and mix logs; assert exclusive handle and worker ownership."""
-    def __init__(self):
+    def __init__(self, model="ESP32-C5"):
+        self.model = model
         self.incoming = queue.Queue()
         self.boot = "0123456789abcdef"
         self.session = 1
@@ -89,7 +90,7 @@ class SerialC5:
             return len(packet)
         response = {"v": 2, "id": request["id"], "boot": self.boot, "session": self.session, "ok": True}
         if operation == "hello":
-            result = {"device": "ESP32-C5", "protocol": 2}
+            result = {"device": self.model, "protocol": 2}
         elif operation == "read":
             result = copy.deepcopy(self.config)
         else:

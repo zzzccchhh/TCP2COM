@@ -178,6 +178,7 @@ class GUITests(unittest.TestCase):
         client = C5Client(self.gui.config_url.get())
         client.bind_session("0123456789abcdef-1")
         self.gui.read_identity = client.identity
+        self.gui.read_device = "c5"
         self.gui._fill_c5(config)
         self.gui._c5_enable()
         return config
@@ -230,6 +231,90 @@ class GUITests(unittest.TestCase):
             self.gui.save_c5()
         self.assertIn("读取", str(error.call_args))
         http.assert_not_called()
+
+    def test_s3_switch_clears_c5_read_and_passwords_and_limits_band(self):
+        self.read_fixture()
+        self.gui.c5_forms["ap"].set("ap_password", "private-unused")
+        self.gui.network.set("device", "s3")
+        self.assertIsNone(self.gui.baseline)
+        self.assertIsNone(self.gui.read_identity)
+        self.assertEqual(self.gui.c5_forms["ap"].get("ap_password"), "")
+        self.assertEqual(self.gui.c5_forms["common"].options["band"], {"2.4 GHz": 0})
+        self.assertIn("GPIO4", self.gui.setup_hint.get())
+        self.assertIn("ESP32-S3", self.gui.c5_buttons[1]["text"])
+        self.assertEqual(str(self.gui.usb_form.widgets["usb_port"]["state"]), "normal")
+        with mock.patch.object(self.gui, "error") as error, mock.patch.object(self.gui, "_http") as send:
+            self.gui.save_c5()
+        self.assertIn("读取", str(error.call_args))
+        send.assert_not_called()
+        self.gui.network.set("device", "c5")
+        self.assertEqual(set(self.gui.c5_forms["common"].options["band"].values()), {0, 1, 2})
+
+    def test_s3_single_usb_read_and_save(self):
+        self.gui.network.set("device", "s3")
+        device = self.connect_usb_fixture(SerialC5(model="ESP32-S3"))
+        self.gui.read_c5()
+        wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        self.assertEqual(self.gui.read_device, "s3")
+        self.gui.c5_forms["common"].set("baud", "921600")
+        with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True):
+            self.gui.save_c5()
+        wait_for(lambda: "已写入 NVS" in self.gui.c5_status.get(), self.root.update)
+        self.assertEqual(device.save_count, 1)
+        self.assertEqual(device.requests[-1]["patch"], {"baud": 921600})
+
+    def test_s3_rejects_c5_usb_model(self):
+        self.gui.network.set("device", "s3")
+        device = self.connect_usb_fixture()
+        self.gui.read_c5()
+        wait_for(lambda: not self.gui.http_busy, self.root.update)
+        self.assertIn("不是", self.gui.c5_status.get())
+        self.assertIsNone(self.gui.baseline)
+        self.assertEqual(device.save_count, 0)
+
+    def test_s3_usb_read_result_after_disconnect_is_discarded(self):
+        self.gui.network.set("device", "s3")
+        self.connect_usb_fixture(SerialC5(model="ESP32-S3"))
+        self.gui.read_c5()
+        self.gui.http_thread.join(2)  # Leave the queued result for the GUI thread.
+        self.assertFalse(self.gui.http_thread.is_alive())
+        self.gui.controller.snapshot()[1].close()
+        self.gui._http_results()
+        self.assertIsNone(self.gui.baseline)
+        self.assertIn("丢弃旧请求", self.gui.c5_status.get())
+
+    def test_stale_result_discarded_after_switch_away_and_back(self):
+        entered, release = threading.Event(), threading.Event()
+        def delayed_read(_client):
+            entered.set()
+            release.wait(2)
+            return example_config()
+        with mock.patch("c5_config.C5Client.read", delayed_read):
+            self.gui.read_c5()
+            self.assertTrue(entered.wait(1))
+            self.gui.network.set("device", "s3")
+            self.gui.network.set("device", "c5")
+            release.set()
+            wait_for(lambda: not self.gui.http_busy, self.root.update)
+        self.assertIsNone(self.gui.baseline)
+        self.assertIn("丢弃旧请求", self.gui.c5_status.get())
+
+    def test_s3_import_rejects_5g_and_backup_records_model_without_passwords(self):
+        self.gui.network.set("device", "s3")
+        config = example_config()
+        self.gui._fill_c5(config)
+        path = Path(self.temporary.name) / "s3-backup.json"
+        self.gui.c5_forms["ap"].set("ap_password", "private-unused")
+        with mock.patch("tcp2com_gui.filedialog.asksaveasfilename", return_value=str(path)):
+            self.gui.backup_c5()
+        backup = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(backup["device"], "s3")
+        self.assertNotIn("private-unused", path.read_text(encoding="utf-8"))
+        path.write_text(json.dumps({"format": "c5-user-config-v1", "config": {**config, "band": 1, "ap_channel": 36}}), encoding="utf-8")
+        with mock.patch("tcp2com_gui.filedialog.askopenfilename", return_value=str(path)), mock.patch.object(self.gui, "error") as error:
+            self.gui.import_c5()
+        error.assert_called_once()
+        self.assertEqual(self.gui.c5_forms["common"].get("band"), 0)
 
     def test_save_sends_only_delta_and_clear_is_explicit(self):
         self.read_fixture()
@@ -360,7 +445,7 @@ class GUITests(unittest.TestCase):
         self.gui.c5_forms["ap"].set("ap_password", "private-gui-secret")
         device.drop = "save"
         with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True), \
-                mock.patch("tcp2com_gui.C5USBClient", side_effect=lambda m: C5USBClient(m, timeout=.1)):
+                mock.patch("tcp2com_gui.C5USBClient", side_effect=lambda m, **kw: C5USBClient(m, timeout=.1, **kw)):
             self.gui.save_c5()
         wait_for(lambda: "待确认" in self.gui.c5_status.get(), self.root.update)
         self.assertIsNone(self.gui.baseline)
@@ -371,7 +456,7 @@ class GUITests(unittest.TestCase):
         device = SerialC5()
         device.setup = False
         self.connect_usb_fixture(device)
-        with mock.patch("tcp2com_gui.C5USBClient", side_effect=lambda m: C5USBClient(m, timeout=.1)):
+        with mock.patch("tcp2com_gui.C5USBClient", side_effect=lambda m, **kw: C5USBClient(m, timeout=.1, **kw)):
             self.gui.read_c5()
         wait_for(lambda: "超时" in self.gui.c5_status.get(), self.root.update)
         self.assertIn("配网", self.gui.c5_status.get())

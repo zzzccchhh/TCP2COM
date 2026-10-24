@@ -1,8 +1,11 @@
-tcp2com 原 ESP-01S 协议与操作说明
+tcp2com ESP-01S / ESP32-C5 / ESP32-S3 协议与操作说明
 
-当前通用功能、ESP32-C5 TCP 服务端/UDP、JSON 配置和 USB 诊断请先阅读 readme.md。
-中文图形界面双击“启动_图形界面.bat”；支持桥接参数切换及 C5 用户配置读取、修改、保存并重启，操作步骤见 readme.md。
-本文件后半部分保留 ESP-01S 8081 复位协议，C5 不支持此协议。
+当前通用功能、ESP32-C5/S3 TCP 服务端/UDP、JSON 配置和 USB 诊断请先阅读 readme.md。
+中文图形界面双击“启动_图形界面.bat”；支持 C5/S3 用户配置读取、修改、保存并重启。
+S3 选择 s3-client 并加载，或双击“启动_S3.bat”；默认连接 192.168.4.1:8080，使用前修改业务 COM。
+S3 原生 USB 为 GPIO19/20，配网按键 GPIO4，长按至少 3 秒后松开；仅支持 2.4 GHz。
+USB hello 按所选型号校验，S3 的读写、导入均拒绝 5 GHz/AUTO。完整操作见 readme.md。
+本文件后半部分保留 ESP-01S 8081 复位协议，C5/S3 不支持此协议。
 
 1. 安装 Python 3。
 2. 在此目录运行：py -3 -m pip install -r requirements-tcp2com.txt

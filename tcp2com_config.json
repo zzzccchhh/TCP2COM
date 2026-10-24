@@ -42,6 +42,40 @@
       "com": "COM1",
       "baud": 1152000,
       "control_port": 8081
+    },
+    "s3-client": {
+      "device": "s3",
+      "mode": "tcp-client",
+      "host": "192.168.4.1",
+      "port": 8080,
+      "com": "COM1",
+      "baud": 1152000
+    },
+    "s3-spi-tcp": {
+      "device": "s3",
+      "mode": "tcp-server",
+      "listen": "0.0.0.0",
+      "port": 8080,
+      "com": "COM1",
+      "baud": 1152000
+    },
+    "s3-spi-udp": {
+      "device": "s3",
+      "mode": "udp",
+      "listen": "0.0.0.0",
+      "port": 8080,
+      "host": "192.168.137.200",
+      "peer_port": 6060,
+      "udp_payload": 1200,
+      "com": "COM1",
+      "baud": 1152000
+    },
+    "s3-capture": {
+      "device": "s3",
+      "mode": "tcp-client",
+      "host": "192.168.4.1",
+      "port": 8080,
+      "capture": "received-s3.bin"
     }
   }
 }

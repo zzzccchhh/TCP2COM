@@ -193,7 +193,7 @@ class ConfigHTTPTests(unittest.TestCase):
         self.assertIsNone(self.client.http_session)
 
     def test_403_and_503_have_actionable_explanations_and_no_retry(self):
-        for status, hint in ((403, "GPIO24"), (503, "重启")):
+        for status, hint in ((403, f"GPIO{self.client.capabilities.setup_button}"), (503, "重启")):
             self.server.status = status
             with self.subTest(status=status), self.assertRaisesRegex(ConfigError, hint) as failure:
                 self.client.save({"mode": 1})

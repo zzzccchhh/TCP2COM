@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ESP-01S / ESP32-C5 TCP、UDP <-> COM 双向桥接与原始数据接收。
+"""ESP-01S / ESP32-C5 / ESP32-S3 TCP、UDP <-> COM 双向桥接与原始数据接收。
 
 特性：
 - TCP -> 串口、串口 -> TCP 双向透传
@@ -32,6 +32,7 @@ from typing import Optional, Tuple
 from console_control import WindowsConsoleControl
 from reset_control import ConsoleResetController
 from bridge_settings import load_defaults
+from device_capabilities import DEVICES, capabilities
 from network_transport import TCPServer, DatagramStream, DatagramSendError
 
 try:
@@ -435,10 +436,10 @@ class App:
                 self.ui.message(f"UDP 固定对端 {self.args.host}:{self.args.peer_port}；报文载荷 {self.args.udp_payload} B；不保证送达/顺序")
         if self.capture:
             self.ui.message(f"仅网络接收，原始载荷保存至：{self.args.capture}；不写入任何日志文本")
-        if self.args.device == "c5":
-            self.ui.message("C5 无 TCP 8081 远程复位；GPIO12 是主控发给 C5 的软件 RST 输入")
+        if capabilities(self.args.device).usb:
+            self.ui.message(f"{capabilities(self.args.device).label} 无 TCP 8081 远程复位；SPI 模式 GPIO12 为软件 RST 输入")
         if self.args.usb_port:
-            self.usb = USBMonitor(self.args.usb_port, self.args.usb_baud, self.ui.message, self.args.usb_log)
+            self.usb = USBMonitor(self.args.usb_port, self.args.usb_baud, self.ui.message, self.args.usb_log, device=self.args.device)
             self.usb.start()
         self.ui.message(
             f"参数：重连={self.args.reconnect:.1f}s，Keepalive 空闲={self.args.keepalive_idle:.1f}s，"
@@ -944,23 +945,23 @@ class App:
 def build_parser(parser_class=argparse.ArgumentParser):
     parser = parser_class(
         prog="tcp2com",
-        description="ESP-01S / ESP32-C5 TCP、UDP 与 COM 桥接及二进制接收",
+        description="ESP-01S / ESP32-C5 / ESP32-S3 TCP、UDP 与 COM 桥接及二进制接收",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--config", help="JSON 配置文件；仅显式指定时读取")
     parser.add_argument("--profile", help="JSON profiles 中的配置名称")
-    parser.add_argument("--device", choices=("esp01s", "c5"), default="esp01s", help="设备能力；C5 禁用旧复位入口")
+    parser.add_argument("--device", choices=tuple(DEVICES), default="esp01s", help="设备能力；C5/S3 禁用旧复位入口")
     parser.add_argument("--mode", choices=("tcp-client", "tcp-server", "udp"), default="tcp-client")
     parser.add_argument("--listen", default="0.0.0.0", help="TCP 服务端/UDP 本地 IPv4 绑定地址")
-    parser.add_argument("--peer-port", type=int, default=6060, help="UDP 对端 C5 本地端口")
+    parser.add_argument("--peer-port", type=int, default=6060, help="UDP 对端设备本地端口")
     parser.add_argument("--udp-payload", type=int, default=1200, help="本地→UDP 每包最大载荷，1～65507")
     parser.add_argument("--capture", help="仅网络接收至新建二进制文件，与 --com 二选一")
-    parser.add_argument("--usb-port", help="C5 原生 USB 日志 COM；与业务 COM 不同")
+    parser.add_argument("--usb-port", help="C5/S3 原生 USB 日志 COM；与业务 COM 不同")
     parser.add_argument("--usb-baud", type=int, default=115200, help="USB 日志串口参数")
     parser.add_argument("--usb-log", help="USB 文本日志文件，追加保存")
-    parser.add_argument("--open-config", action="store_true", help="仅打开 C5 配网页面后退出；需先手动进入配置热点")
-    parser.add_argument("--config-url", default="http://192.168.4.1/", help="C5 配网页面地址")
-    parser.add_argument("--config-transport", choices=("http", "usb"), default="http", help="GUI 的 C5 配置连接方式")
+    parser.add_argument("--open-config", action="store_true", help="仅打开设备配网页面后退出；需先手动进入配置热点")
+    parser.add_argument("--config-url", default="http://192.168.4.1/", help="设备配网页面地址")
+    parser.add_argument("--config-transport", choices=("http", "usb"), default="http", help="GUI 的设备配置连接方式")
     parser.add_argument("--host", help="TCP 客户端/UDP 的对端地址；TCP 服务端可选的来源 IP 筛选")
     parser.add_argument("--port", type=int, default=8080, help="TCP 客户端目标端口；TCP 服务端/UDP 本地监听端口")
     parser.add_argument("--control-port", type=int, default=8081, help="ESP 独立复位控制端口")
@@ -1002,7 +1003,7 @@ def parse_args(argv=None, parser_class=argparse.ArgumentParser):
         parser.error("--com 和 --capture 必须且只能选择一个")
     if not 1 <= args.port <= 65535:
         parser.error("--port 必须在 1～65535 之间")
-    if args.device == "c5" or args.mode != "tcp-client":
+    if not capabilities(args.device).reset or args.mode != "tcp-client":
         args.no_reset_ui = True
     if not 1 <= args.control_port <= 65535 or (not args.no_reset_ui and args.control_port == args.port):
         parser.error("--control-port 必须在 1～65535 之间，且不能与透传端口相同")
@@ -1022,8 +1023,8 @@ def parse_args(argv=None, parser_class=argparse.ArgumentParser):
         parser.error("UDP 对端端口范围 1～65535，载荷范围 1～65507")
     if args.usb_baud <= 0 or (args.usb_log and not args.usb_port):
         parser.error("USB 波特率必须大于 0；--usb-log 需要 --usb-port")
-    if args.usb_port and args.device != "c5":
-        parser.error("--usb-port 仅用于 C5 原生 USB 日志")
+    if args.usb_port and not capabilities(args.device).usb:
+        parser.error("--usb-port 仅用于 C5/S3 原生 USB 日志")
     if args.usb_port and args.com and args.usb_port.casefold() == args.com.casefold():
         parser.error("USB 日志端口不能与业务 COM 相同")
     if args.capture and args.usb_log and os.path.realpath(args.capture).casefold() == os.path.realpath(args.usb_log).casefold():
@@ -1058,7 +1059,7 @@ def main(argv=None):
         list_coms()
         return 0
     if args.open_config:
-        print("长按 C5 按键至少 3 秒后松开，连接 ESP32-C5-Setup，再使用配置网页。普通业务模式返回 403。")
+        print(capabilities(args.device if args.device != "esp01s" else "c5").setup_hint + " 普通业务模式返回 403。")
         return 0 if webbrowser.open(args.config_url) else 1
 
     ui = ConsoleUI()

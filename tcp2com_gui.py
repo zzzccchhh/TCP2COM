@@ -15,13 +15,14 @@ import webbrowser
 
 from c5_config import C5Client, ConfigError, SaveOutcomeUnknown, changed_config, public_config
 from c5_usb_config import C5USBClient
+from device_capabilities import DEVICES, BANDS, capabilities
 from gui_support import (BridgeController, atomic_json, config_job, default_settings,
                          load_profile, read_profiles, save_profile, settings_to_args)
 from reset_control import ResetPanel
 from serial.tools import list_ports
 
 BASE = Path(__file__).resolve().parent
-DEVICE = {"ESP32-C5": "c5", "ESP-01S": "esp01s"}
+DEVICE = {caps.label: key for key, caps in DEVICES.items()}
 MODES = {"TCP 客户端（电脑连接设备）": "tcp-client", "TCP 服务端（电脑等待设备）": "tcp-server",
          "UDP（固定对端）": "udp"}
 
@@ -93,7 +94,7 @@ class Form:
 class BridgeGUI:
     def __init__(self, root, profile_path=None, controller=None):
         self.root = root
-        self.root.title("Wi-Fi 桥接工具 · ESP32-C5 / ESP-01S")
+        self.root.title("Wi-Fi 桥接工具 · ESP32-S3 / ESP32-C5 / ESP-01S")
         self.root.geometry("1120x820")
         self.root.minsize(900, 650)
         self.controller = controller or BridgeController()
@@ -106,6 +107,9 @@ class BridgeGUI:
         self.http_busy = False
         self.baseline = None
         self.read_identity = None
+        self.read_device = None
+        self.selected_context = None
+        self.context_epoch = 0
         self.logs = deque(maxlen=3000)
         self.log_dirty = False
         self.last_refresh = 0
@@ -119,7 +123,7 @@ class BridgeGUI:
         self.runtime = tk.StringVar(root, value="")
         self.rates = tk.StringVar(root, value="网络接收 / 本地写入 / 网络发送：0 B/s")
         self.totals = tk.StringVar(root, value="队列 0 / 0 · 累计丢弃 0 / 0")
-        self.c5_status = tk.StringVar(root, value="尚未读取 C5；可选择 USB 单线连接，或 Wi-Fi 配置热点")
+        self.c5_status = tk.StringVar(root, value="尚未读取设备；可选择 USB 单线连接，或 Wi-Fi 配置热点")
         self.c5_dirty = tk.StringVar(root, value="请先读取")
         self.usb_status = tk.StringVar(root, value="USB 诊断未启动")
         self.filter_text = tk.StringVar(root)
@@ -142,7 +146,7 @@ class BridgeGUI:
         title.pack(fill="x")
         ttk.Label(title, text="Wi-Fi 桥接工具", font=("Microsoft YaHei UI", 17, "bold")).pack(side="left")
         ttk.Label(title, textvariable=self.status, foreground="#166534").pack(side="right")
-        profiles = ttk.LabelFrame(outer, text="电脑本地配置（不写入 C5）", padding=8)
+        profiles = ttk.LabelFrame(outer, text="电脑本地配置（不写入设备）", padding=8)
         profiles.pack(fill="x", pady=8)
         ttk.Entry(profiles, textvariable=self.profile_path, width=30).pack(side="left", fill="x", expand=True)
         ttk.Button(profiles, text="文件…", command=self.choose_profiles).pack(side="left", padx=4)
@@ -165,7 +169,7 @@ class BridgeGUI:
         self.tabs = ttk.Notebook(outer)
         self.tabs.pack(fill="both", expand=True)
         self.network = self._tab("网络连接")
-        self.network.note("这里设置电脑的网络角色。C5 的 UART/SPI、三种 Wi-Fi 联网模式请在“C5 用户配置”中修改。")
+        self.network.note("这里设置电脑的网络角色。C5/S3 的 UART/SPI、三种 Wi-Fi 联网模式请在设备用户配置中修改。")
         self.network.add("device", "设备", "c5", DEVICE)
         self.network.add("mode", "电脑网络角色", "tcp-server", MODES)
         self.network.add("host", "设备地址 / 服务端来源 IP 筛选", "")
@@ -186,7 +190,7 @@ class BridgeGUI:
         self.local.add("parity", "校验位", "N", ("N", "E", "O", "M", "S"))
         self.local.add("stopbits", "停止位", "1", ("1", "1.5", "2"))
         self.local.add("flow", "流控", "none", {"无": "none", "RTS/CTS": "rtscts", "DSR/DTR": "dsrdtr"})
-        self.local.note("程序打开已有 COM，不创建虚拟串口。本地波特率不会修改 C5 UART 或 CH32 SPI。接收文件必须不存在。")
+        self.local.note("程序打开已有 COM，不创建虚拟串口。本地波特率不会修改设备 UART 或 CH32 SPI。接收文件必须不存在。")
         self.advanced = self._tab("高级参数")
         for key, label, value in (("timeout", "COM 读超时（秒，可为 0）", "0.02"),
                                   ("write_timeout", "COM 写超时（秒）", "2"),
@@ -203,7 +207,7 @@ class BridgeGUI:
         self.advanced.add("verbose", "调试日志", False, boolean=True)
         self._build_c5()
         self.usb_form = self._tab("USB 诊断")
-        self.usb_form.note("C5 原生 USB Serial/JTAG 日志及配置共用此连接，独立于业务 COM。可在未启动桥接时单独开启。")
+        self.usb_form.note("C5/S3 原生 USB Serial/JTAG 日志及配置共用此连接，独立于业务 COM。可在未启动桥接时单独开启。")
         self.usb_form.add("usb_port", "USB COM（日志 / 配置，留空关闭）", "", serial_port=True)
         self.c5_usb_combo.configure(textvariable=self.usb_form.variables["usb_port"])
         ttk.Button(self.usb_form.frame, text="刷新串口", command=self.refresh_ports).grid(row=1, column=2, padx=6)
@@ -230,7 +234,8 @@ class BridgeGUI:
             for variable in form.variables.values():
                 variable.trace_add("write", lambda *_: self._sync())
         self.output.trace_add("write", lambda *_: self._sync())
-        self.config_transport.trace_add("write", lambda *_: self._c5_enable())
+        self.config_transport.trace_add("write", lambda *_: self._sync())
+        self.config_url.trace_add("write", lambda *_: self._sync())
 
     def _tab(self, text):
         frame = ttk.Frame(self.tabs)
@@ -267,8 +272,8 @@ class BridgeGUI:
             button = ttk.Button(toolbar, text=text, command=callback)
             button.pack(side="left", padx=2)
             self.c5_buttons.append(button)
-        ttk.Label(self.c5_frame, text="先长按 GPIO24 ≥3 秒后松开进入配网。USB：Type-C 连接后读取，无需连接 Wi-Fi 或启动桥接。HTTP：连接 ESP32-C5-Setup。",
-                  wraplength=1000).pack(anchor="w", pady=(8, 2))
+        self.setup_hint = tk.StringVar(self.root)
+        ttk.Label(self.c5_frame, textvariable=self.setup_hint, wraplength=1000).pack(anchor="w", pady=(8, 2))
         ttk.Label(self.c5_frame, textvariable=self.c5_status, foreground="#1d4ed8", wraplength=1000).pack(anchor="w", pady=4)
         ttk.Label(self.c5_frame, textvariable=self.usb_status, wraplength=1000).pack(anchor="w")
         bar = ttk.Frame(self.c5_frame)
@@ -287,11 +292,11 @@ class BridgeGUI:
             self.c5_forms[name] = Form(frame)
         form = self.c5_forms["common"]
         form.note("读取的是启动配置 / NVS，不是 SPI 命令临时覆盖的运行参数。明确保存后写 NVS 并重启，业务连接会断开。")
-        form.add("link_mode", "C5 业务接口", 0, {"UART0": 0, "逐飞 SPI": 1})
-        form.add("mode", "C5 Wi-Fi 联网模式", 0, {"自建热点 AP": 0, "连接电脑热点": 1, "连接共享 Wi-Fi": 2})
+        form.add("link_mode", "设备业务接口", 0, {"UART0": 0, "逐飞 SPI": 1})
+        form.add("mode", "设备 Wi-Fi 联网模式", 0, {"自建热点 AP": 0, "连接电脑热点": 1, "连接共享 Wi-Fi": 2})
         form.add("band", "频段", 0, {"2.4 GHz": 0, "5 GHz": 1, "自动（AP 使用 2.4 GHz）": 2})
-        form.add("baud", "C5 UART 波特率（SPI 模式保留）", "1152000")
-        form.add("tcp_port", "C5 默认 TCP 服务端端口", "8080")
+        form.add("baud", "设备 UART 波特率（SPI 模式保留）", "1152000")
+        form.add("tcp_port", "设备默认 TCP 服务端端口", "8080")
         ap = self.c5_forms["ap"]
         ap.note("密码留空保留原密码；设备不返回旧密码。AP 不支持开放网络。更改业务 AP IP 不改变配置热点地址。")
         for key, label in (("ap_ssid", "SSID"), ("ap_password", "新密码（8～63 字节，留空保留）"),
@@ -349,7 +354,7 @@ class BridgeGUI:
             result["com"] = None
         else:
             result["capture"] = None
-        if result["device"] != "c5":
+        if not capabilities(result["device"]).usb:
             result["usb_port"] = result["usb_log"] = None
         return result
 
@@ -357,6 +362,22 @@ class BridgeGUI:
         if not hasattr(self, "usb_form"):
             return
         device = self.network.get("device")
+        caps = capabilities(device)
+        context = (device, self.config_transport.get(), self.config_url.get(), self.usb_form.get("usb_port").strip().casefold())
+        if context != self.selected_context:
+            device_changed = self.selected_context is None or self.selected_context[0] != device
+            self.selected_context = context
+            self._invalidate_config()
+            self.c5_status.set("设备或配置连接已改变，请重新读取")
+            if device_changed and caps.usb:
+                form = self.c5_forms["common"]
+                form.options["band"] = {label: value for label, value in BANDS.items() if value in caps.bands}
+                form.widgets["band"].configure(values=list(form.options["band"]))
+                form.set("band", 0)
+        self.setup_hint.set(caps.setup_hint if caps.usb else "ESP-01S 使用原有透传与复位功能。")
+        self.tabs.tab(self.c5_frame, text=f"{caps.label} 用户配置" if caps.usb else "设备用户配置")
+        self.c5_buttons[1].configure(text=f"读取 {caps.label}")
+        self.c5_buttons[2].configure(text=f"保存并重启 {caps.label}")
         mode = self.network.get("mode")
         self.network.enable("listen", mode != "tcp-client")
         for key in ("peer_port", "udp_payload"):
@@ -365,16 +386,21 @@ class BridgeGUI:
         for key in ("com", "baud", "bytesize", "parity", "stopbits", "flow"):
             self.local.enable(key, self.output.get() == "COM 双向桥接")
         for key in self.usb_form.variables:
-            self.usb_form.enable(key, device == "c5")
+            self.usb_form.enable(key, caps.usb)
         for key in ("control_port", "no_reset_ui"):
             self.advanced.enable(key, device == "esp01s" and mode == "tcp-client")
-        self.tabs.tab(self.c5_frame, state="normal" if device == "c5" else "disabled")
-        if device != "c5":
+        self.tabs.tab(self.c5_frame, state="normal" if caps.usb else "disabled")
+        if not caps.usb:
             self.baseline = None
             self.read_identity = None
             self._clear_passwords()
-            self.c5_status.set("仅 C5 模式可读取配置；切回后请重新读取")
+            self.c5_status.set("请选择 C5/S3 设备后读取配置")
         self._c5_enable()
+
+    def _invalidate_config(self):
+        self.context_epoch += 1
+        self.baseline = self.read_identity = self.read_device = None
+        self._clear_passwords()
 
     def _station_sync(self, name):
         form = self.c5_forms[name]
@@ -382,7 +408,7 @@ class BridgeGUI:
             form.enable(key, form.get("static_ip"))
 
     def _c5_enable(self):
-        enabled = self.network.get("device") == "c5" and not self.http_busy and not self.closing
+        enabled = capabilities(self.network.get("device")).usb and not self.http_busy and not self.closing
         for index, button in enumerate(self.c5_buttons):
             button.configure(state="normal" if enabled and (index in (0, 1) or self.baseline is not None) else "disabled")
         usb = self.config_transport.get() == "USB"
@@ -402,7 +428,7 @@ class BridgeGUI:
             passwords = {"ap": self.c5_forms["ap"].get("ap_password"),
                          **{name: self.c5_forms[name].get("password") for name in ("pc", "shared")}}
             clear = [name for name in ("pc", "shared") if self.c5_forms[name].get("clear_password")]
-            dirty = changed_config(self.baseline, self.edited_c5(), passwords, clear)
+            dirty = changed_config(self.baseline, self.edited_c5(), passwords, clear, device=self.network.get("device"))
             self.c5_dirty.set("已修改，尚未保存" if dirty else "与上次读取一致")
         except ValueError:
             self.c5_dirty.set("编辑未保存，请检查参数")
@@ -444,7 +470,7 @@ class BridgeGUI:
         try:
             save_profile(self.profile_path.get(), self.profile_name.get(), self.settings())
             self._profile_list()
-            self.controller.ui.message("电脑配置已保存；未改变运行参数，未写入 C5")
+            self.controller.ui.message("电脑配置已保存；未改变运行参数，未写入设备")
         except (ValueError, OSError) as exc:
             self.error(exc)
 
@@ -483,7 +509,8 @@ class BridgeGUI:
         try:
             args = settings_to_args(self.settings())
             self._reset_shutdown()
-            self.controller.submit(command, args)
+            if self.controller.submit(command, args):
+                self._invalidate_config()
         except ValueError as exc:
             self.error(exc)
 
@@ -504,32 +531,41 @@ class BridgeGUI:
             values = vars(copy.deepcopy(app.args)) if app else {
                 "device": "c5", "mode": "tcp-server", "com": "diagnostics-only"}
             values.update(self.usb_form.values())
-            if self.network.get("device") != "c5":
-                raise ValueError("请切换到 C5 设备后设置 USB 诊断；停止按钮也可关闭已运行的诊断")
+            values["device"] = self.network.get("device")
+            if not capabilities(values["device"]).usb:
+                raise ValueError("请切换到 C5/S3 设备后设置 USB 诊断；停止按钮也可关闭已运行的诊断")
             args = settings_to_args(values)
             if not self.controller.submit("usb", args):
                 raise ValueError("连接操作正在进行，请稍后再试")
+            self._invalidate_config()
             return True
         except ValueError as exc:
             self.error(exc)
 
     def connect_c5_usb(self):
         if not self.usb_form.get("usb_port").strip():
-            self.error("请先选择 C5 原生 USB COM")
+            self.error("请先选择设备的原生 USB COM")
             return
         if self.apply_usb():
-            self.c5_status.set("正在连接 USB；请先长按 GPIO24 ≥3 秒后松开进入配网，再点击“读取 C5”。无需连接 Wi-Fi 或启动桥接。")
+            self.c5_status.set("正在连接 USB；" + capabilities(self.network.get("device")).setup_hint + " 连接完成后点击读取。")
 
     def _config_client(self):
+        device = self.network.get("device")
         if self.config_transport.get() == "USB":
             monitor = self.controller.snapshot()[1]
             if not monitor or monitor.port.casefold() != self.usb_form.get("usb_port").strip().casefold():
-                raise ConfigError("请先连接所选 USB COM，再读取 C5")
-            return C5USBClient(monitor)
-        client = C5Client(self.config_url.get())
+                raise ConfigError("请先连接所选 USB COM，再读取设备")
+            if monitor.capabilities != capabilities(device):
+                raise ConfigError("USB 连接的设备选择已改变，请重新连接 USB 后读取")
+            client = C5USBClient(monitor, device=device)
+            if self.read_device == device and self.read_identity == client.identity:
+                client.baseline = copy.deepcopy(self.baseline)
+            return client
+        client = C5Client(self.config_url.get(), device=device)
         identity = self.read_identity
-        if identity and len(identity) == 4 and identity[:3] == client.identity:
+        if self.read_device == device and identity and len(identity) == 4 and identity[:3] == client.identity:
             client.bind_session(identity[3])
+            client.baseline = copy.deepcopy(self.baseline)
         return client
 
     def show_reset(self):
@@ -547,7 +583,7 @@ class BridgeGUI:
             self.error(exc)
 
     def _http(self, action, patch=None):
-        if self.http_busy or self.network.get("device") != "c5":
+        if self.http_busy or not capabilities(self.network.get("device")).usb:
             return
         client = self._config_client()
         if action == "read":
@@ -555,7 +591,8 @@ class BridgeGUI:
         self.http_busy = True
         self._c5_enable()
         self.c5_status.set("正在读取…" if action == "read" else "正在保存到 NVS，请等待响应…")
-        self.http_thread = threading.Thread(target=config_job, args=(self.http_events, action, client, patch),
+        context = (self.context_epoch, self.network.get("device"))
+        self.http_thread = threading.Thread(target=config_job, args=(self.http_events, action, client, patch, context),
                                             name="c5-config", daemon=True)
         self.http_thread.start()
 
@@ -598,20 +635,22 @@ class BridgeGUI:
         for name in ("pc", "shared"):
             result[name] = {key: value for key, value in self.c5_forms[name].values().items()
                             if key not in ("password", "clear_password")}
-        return public_config(result)
+        return public_config(result, self.network.get("device"))
 
     def save_c5(self):
         try:
-            if self.baseline is None or self.read_identity != self._config_client().identity:
-                raise ConfigError("请先从当前 USB 连接或配置地址读取 C5，之后才能保存")
+            if (self.baseline is None or self.read_device != self.network.get("device") or
+                    self.read_identity != self._config_client().identity):
+                raise ConfigError("请先从当前 USB 连接或配置地址读取所选设备，之后才能保存")
             passwords = {"ap": self.c5_forms["ap"].get("ap_password"),
                          **{name: self.c5_forms[name].get("password") for name in ("pc", "shared")}}
             clear = [name for name in ("pc", "shared") if self.c5_forms[name].get("clear_password")]
-            patch = changed_config(self.baseline, self.edited_c5(), passwords, clear)
+            patch = changed_config(self.baseline, self.edited_c5(), passwords, clear, device=self.network.get("device"))
             if not patch:
                 self.c5_status.set("没有修改，无需写入 NVS")
                 return
-            if messagebox.askokcancel("保存 C5 并重启", "将修改写入 C5 NVS 并重启，业务连接会中断。继续？", parent=self.root):
+            label = capabilities(self.network.get("device")).label
+            if messagebox.askokcancel(f"保存 {label} 并重启", f"将修改写入 {label} NVS 并重启，业务连接会中断。继续？", parent=self.root):
                 self._http("save", patch)
                 self._clear_passwords()
         except ValueError as exc:
@@ -620,14 +659,14 @@ class BridgeGUI:
     def undo_c5(self):
         if self.baseline:
             self._fill_c5(self.baseline)
-            self.c5_status.set("已恢复到上次读取内容；未写入 C5")
+            self.c5_status.set("已恢复到上次读取内容；未写入设备")
 
     def backup_c5(self):
         try:
             config = self.edited_c5()
-            path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".json", initialfile="c5-config-backup.json")
+            path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".json", initialfile=f"{self.network.get('device')}-config-backup.json")
             if path:
-                atomic_json(path, {"format": "c5-user-config-v1", "config": config})
+                atomic_json(path, {"format": "wifi-bridge-user-config-v1", "device": self.network.get("device"), "config": config})
                 self.c5_status.set("已备份编辑区（不含密码）；恢复到其他设备时需重新填写密码")
         except (ValueError, OSError) as exc:
             self.error(exc)
@@ -638,19 +677,35 @@ class BridgeGUI:
             return
         try:
             document = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-            if not isinstance(document, dict) or document.get("format") != "c5-user-config-v1":
-                raise ConfigError("不支持的 C5 备份格式（与电脑 profiles 文件不同）")
-            self._fill_c5(public_config(document["config"]))
-            self.c5_status.set("已导入到编辑区；密码未导入，尚未写入 C5")
+            if not isinstance(document, dict) or document.get("format") not in ("c5-user-config-v1", "wifi-bridge-user-config-v1"):
+                raise ConfigError("不支持的设备备份格式（与电脑 profiles 文件不同）")
+            self._fill_c5(public_config(document["config"], self.network.get("device")))
+            self.c5_status.set("已导入到编辑区；密码未导入，尚未写入设备")
         except (KeyError, ValueError, OSError) as exc:
             self.error(exc)
 
     def _http_results(self):
         try:
-            action, identity, document, error = self.http_events.get_nowait()
+            event = self.http_events.get_nowait()
         except queue.Empty:
             return
         self.http_busy = False
+        action, identity, document, error = event[:4]
+        if len(event) == 5 and event[4] != (self.context_epoch, self.network.get("device")):
+            self.c5_status.set("配置连接已改变，已丢弃旧请求结果；请重新读取")
+            self._c5_enable()
+            return
+        if action == "read" and not error and identity[0] == "usb":
+            monitor = self.controller.snapshot()[1]
+            try:
+                current = monitor.config_identity() if monitor else None
+            except ConfigError:
+                current = None
+            if current != identity:
+                self._invalidate_config()
+                self.c5_status.set("USB 连接已改变，已丢弃旧请求结果；请重新读取")
+                self._c5_enable()
+                return
         if error:
             self.c5_status.set(str(error))
             if isinstance(error, ConfigError) or identity[0] == "usb":
@@ -658,11 +713,12 @@ class BridgeGUI:
         elif action == "read":
             self.baseline = document
             self.read_identity = identity
+            self.read_device = self.network.get("device")
             self._fill_c5(document)
             self.c5_status.set(f"已读取启动配置 · 来源 {document['config_source']} · {time.strftime('%H:%M:%S')}；修改后需明确保存")
         else:
             self.baseline = self.read_identity = None
-            self.c5_status.set("已写入 NVS，C5 即将重启；USB / HTTP 均需重新进入配网，再读取核对。普通模式 USB 只输出日志。")
+            self.c5_status.set("已写入 NVS，设备即将重启；USB / HTTP 均需重新进入配网，再读取核对。普通模式 USB 只输出日志。")
         self._c5_enable()
 
     def clear_logs(self):
@@ -755,6 +811,15 @@ class BridgeGUI:
         self.poll_job = self.root.after(100, self.poll)
 
     def _usb_status(self, usb, now):
+        if self.baseline is not None and self.read_identity and self.read_identity[0] == "usb":
+            try:
+                current = usb.config_identity() if usb else None
+            except ConfigError:
+                current = None
+            if current != self.read_identity:
+                self._invalidate_config()
+                self.c5_status.set("USB 连接或配网会话已改变，请重新读取")
+                self._c5_enable()
         if not usb:
             self.usb_status.set("USB 诊断未启动")
             if self.current_usb is not None:

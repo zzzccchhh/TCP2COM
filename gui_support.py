@@ -14,6 +14,7 @@ import tempfile
 from bridge_settings import _unique_object
 from tcp2com import App, build_parser, parse_args
 from usb_diagnostics import USBMonitor
+from device_capabilities import capabilities
 
 
 class FormParser(argparse.ArgumentParser):
@@ -165,8 +166,8 @@ class BridgeController:
             previous, self.usb = self.usb, None
         if previous:
             previous.close()
-        if args and args.device == "c5" and args.usb_port and not self.closing:
-            monitor = self.usb_factory(args.usb_port, args.usb_baud, self.ui.message, args.usb_log)
+        if args and capabilities(args.device).usb and args.usb_port and not self.closing:
+            monitor = self.usb_factory(args.usb_port, args.usb_baud, self.ui.message, args.usb_log, device=args.device)
             monitor.start()
             with self.lock:
                 self.usb = monitor
@@ -244,14 +245,15 @@ class EventLogHandler(logging.Handler):
         self.ui.message(f"{record.levelname} | {record.getMessage()}")
 
 
-def config_job(events, action, client, patch=None):
+def config_job(events, action, client, patch=None, context=None):
     """Standalone worker: result queue contains data/exceptions only, no Tk ownership."""
     try:
         result = client.read() if action == "read" else client.save(patch)
-        events.put((action, client.identity, result, None))
+        event = (action, client.identity, result, None)
     except Exception as exc:
         # Do not send exception tracebacks holding request/password frames to the UI.
         exc.__traceback__ = None
         exc.__context__ = None
         exc.__cause__ = None
-        events.put((action, client.identity, None, exc))
+        event = (action, client.identity, None, exc)
+    events.put(event if context is None else (*event, context))

@@ -86,7 +86,7 @@ class SettingsTests(unittest.TestCase):
         for name in json.loads(path.read_text(encoding="utf-8"))["profiles"]:
             with self.subTest(profile=name):
                 args = tcp2com.parse_args(["--config", str(path), "--profile", name])
-                self.assertEqual(args.no_reset_ui, args.device == "c5")
+                self.assertEqual(args.no_reset_ui, args.device in ("c5", "s3"))
 
     def test_invalid_profiles_and_values_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

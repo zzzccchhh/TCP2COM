@@ -1,4 +1,4 @@
-"""One native USB owner for diagnostics and explicit C5 configuration requests."""
+"""One native USB owner for diagnostics and explicit C5/S3 configuration requests."""
 
 import json
 import re
@@ -10,6 +10,7 @@ import serial
 
 from bridge_settings import _unique_object
 from c5_config import ConfigError, SaveOutcomeUnknown
+from device_capabilities import capabilities
 
 PREFIX = b"C5CFG "
 
@@ -47,7 +48,8 @@ def parse_stats(line):
 
 
 class USBMonitor:
-    def __init__(self, port, baud, notify, logfile=None):
+    def __init__(self, port, baud, notify, logfile=None, *, device="c5"):
+        self.capabilities = capabilities(device)
         self.port = port
         self.baud = baud
         self.notify = notify
@@ -61,6 +63,7 @@ class USBMonitor:
         self.generation = None
         self.boot = None
         self.session = None
+        self.device_model = None
         self.pending = None
         self.request_lock = threading.Lock()
 
@@ -80,8 +83,12 @@ class USBMonitor:
     def config_identity(self):
         with self.lock:
             if not self.connected or self.stop_event.is_set():
-                raise ConfigError("USB 未连接；选择 C5 原生 USB COM，点击连接后再读取")
+                raise ConfigError(f"USB 未连接；选择 {self.capabilities.label} 原生 USB COM，点击连接后再读取")
             return ("usb", self.port.casefold(), self.generation, self.boot, self.session)
+
+    def config_device(self):
+        with self.lock:
+            return self.device_model
 
     def request(self, operation, patch=None, boot=None, generation=None, session=None, timeout=4):
         """Only the USB worker touches the handle; never replay a queued write."""
@@ -101,10 +108,10 @@ class USBMonitor:
             if len(packet) - 2 > 2304:
                 raise ConfigError("USB 配置报文过长")
             request = {"id": request_id, "packet": packet, "sent": False, "event": threading.Event(),
-                       "reply": None, "failed": False, "deadline": time.monotonic() + timeout}
+                       "reply": None, "failed": False, "operation": operation, "deadline": time.monotonic() + timeout}
             with self.lock:
                 if not self.connected or self.stop_event.is_set() or (generation is not None and generation != self.generation):
-                    raise ConfigError("USB 连接已改变，请重新连接并读取 C5")
+                    raise ConfigError("USB 连接已改变，请重新连接并读取设备")
                 self.pending = request
             try:
                 request["event"].wait(timeout)
@@ -113,7 +120,7 @@ class USBMonitor:
                     if response is None or request["failed"]:
                         if operation == "save" and request["sent"]:
                             raise SaveOutcomeUnknown("保存结果待确认：USB 超时或断开，请重连后读取核对，勿直接重发")
-                        raise ConfigError("USB 请求超时或断开；请先长按 GPIO24 ≥3 秒后松开进入配网，并检查 COM、固件版本和端口占用")
+                        raise ConfigError(f"USB 请求超时或断开；{self.capabilities.setup_hint} 请检查 COM、固件版本和端口占用")
                     return response
             finally:
                 with self.lock:
@@ -150,6 +157,9 @@ class USBMonitor:
         with self.lock:
             request = self.pending
             if request and request["sent"] and frame.get("id") == request["id"]:
+                if request["operation"] == "hello":
+                    result = frame.get("result")
+                    self.device_model = result.get("device") if frame["ok"] and isinstance(result, dict) else None
                 self.boot = frame["boot"]
                 self.session = frame["session"]
                 request["reply"] = frame
@@ -161,6 +171,7 @@ class USBMonitor:
             self.connected = False
             self.boot = None
             self.session = None
+            self.device_model = None
             if self.pending:
                 self.pending["failed"] = True
                 self.pending["event"].set()

@@ -1,13 +1,13 @@
-# ESP-01S / ESP32-C5 网络与串口桥接上位机
+# ESP-01S / ESP32-C5 / ESP32-S3 网络与串口桥接上位机
 
-支持 TCP 客户端、TCP 服务端和 UDP，将网络原始字节与本地 COM 双向桥接，也可不接 COM，直接保存二进制载荷。提供中文图形界面和命令行，显示连接、速率、队列和丢弃统计；C5 支持独立 USB 诊断及用户配置读写。保留 ESP-01S 的按需复位窗口。
+支持 TCP 客户端、TCP 服务端和 UDP，将网络原始字节与本地 COM 双向桥接，也可不接 COM，直接保存二进制载荷。提供中文图形界面和命令行，显示连接、速率、队列和丢弃统计；C5/S3 支持独立 USB 诊断及用户配置读写。保留 ESP-01S 的按需复位窗口。
 
 ```text
-业务上位机 ↔ COM 对的另一端 ↔ 本程序 ↔ Wi-Fi ↔ ESP-01S UART / C5 UART、SPI ↔ 主控
-                                                └─ C5 USB 日志：独立读取与保存
+业务上位机 ↔ COM 对的另一端 ↔ 本程序 ↔ Wi-Fi ↔ ESP-01S UART / C5、S3 UART/SPI ↔ 主控
+                                                └─ C5/S3 原生 USB：日志及配置
 ```
 
-本程序不解析逐飞 SPI 包头：包头已由 C5 固件处理。图像帧、波形、指令的长度与校验仍由业务上位机和主控约定。
+本程序不解析逐飞 SPI 包头：包头已由设备固件处理。图像帧、波形、指令的长度与校验仍由业务上位机和主控约定。
 
 ## 安装与选择模式
 
@@ -19,7 +19,7 @@ py -3 -B tcp2com.py --list-coms
 py -3 -B tcp2com.py --help
 ```
 
-第三方依赖只有 `pyserial`。中文图形界面和 ESP-01S 复位弹窗需要 Python 自带的 Tcl/Tk；C5 命令行自动禁用复位弹窗，不依赖 Tk。网络服务端和 UDP 监听需要允许 Windows 防火墙中的 Python 入站连接。
+第三方依赖只有 `pyserial`。中文图形界面和 ESP-01S 复位弹窗需要 Python 自带的 Tcl/Tk；C5/S3 命令行自动禁用复位弹窗，不依赖 Tk。网络服务端和 UDP 监听需要允许 Windows 防火墙中的 Python 入站连接。
 
 双击 `启动_图形界面.bat`，或运行：
 
@@ -27,7 +27,7 @@ py -3 -B tcp2com.py --help
 py -3 -B tcp2com_gui.py
 ```
 
-GUI 与原 CLI 共用桥接引擎；原 `启动_C5.bat`、`启动_tcp2com.bat` 继续启动命令行。GUI 不要求管理员权限，也不自动更改电脑网卡、热点或安装虚拟串口。
+GUI 与原 CLI 共用桥接引擎；`启动_C5.bat`、`启动_S3.bat`、`启动_tcp2com.bat` 启动命令行。GUI 不要求管理员权限，也不自动更改电脑网卡、热点或安装虚拟串口。
 
 ## 中文图形界面
 
@@ -35,10 +35,10 @@ GUI 与原 CLI 共用桥接引擎；原 `启动_C5.bat`、`启动_tcp2com.bat` �
 
 | 页面 | 可操作内容 |
 | --- | --- |
-| 网络连接 | ESP-01S/C5、TCP 客户端/服务端/UDP、设备地址或来源筛选、电脑绑定地址、端口、UDP 对端端口和分包载荷 |
+| 网络连接 | ESP-01S/C5/S3、TCP 客户端/服务端/UDP、设备地址或来源筛选、电脑绑定地址、端口、UDP 对端端口和分包载荷 |
 | COM / 文件 | 刷新/选择或手工输入串口、波特率、数据位/校验/停止位/流控；也可切换到新建二进制文件接收 |
 | 高级参数 | 读写/连接超时、重连、Keepalive、缓冲、统计刷新、调试日志、ESP-01S 控制端口和复位入口开关 |
-| C5 用户配置 | USB 单线 / Wi-Fi HTTP 读取启动配置、编辑 UART/SPI 和全部联网配置、撤销、备份/导入、明确保存到 NVS 并重启 |
+| 设备用户配置 | 名称随 C5/S3 选择变化，支持 USB / HTTP 读取启动配置、编辑 UART/SPI 和联网配置、撤销、备份/导入、明确保存并重启 |
 | USB 诊断 | 选择 USB COM、波特率、追加日志；与 USB 配置共用一个连接，可在未启动业务桥接时单独开启 |
 | 运行日志 | 筛选、暂停自动滚动、清空、导出；最多保留 3000 行，工作线程事件队列最多 2000 条，超量计数显示在底部 |
 
@@ -47,6 +47,53 @@ GUI 与原 CLI 共用桥接引擎；原 `启动_C5.bat`、`启动_tcp2com.bat` �
 编辑参数时现有连接继续运行，底部显示实际使用的设备、网络角色、COM 参数、绑定/对端地址和统计。顶部“参数未应用”表示编辑值尚未用于当前连接；点击“应用参数并重启”才释放旧连接并启动新参数。统计刷新、配置连接方式/地址在 GUI 中即时生效，其他业务参数需重启。USB 页的应用只替换 USB 连接；已打开的业务 COM 与 USB COM 必须不同。配置请求进行时暂停替换连接的操作，关闭主窗口仍可取消等待。
 
 最小化窗口继续透传。关闭主窗口会停止桥接、关闭串口和 USB，并等待正在进行的配置请求返回；关闭 ESP-01S 复位子窗口仅隐藏它。C5 模式始终禁用旧 TCP 8081 复位。USB 面板显示已有 `stats` 的原始字段及距更新时间；超过 15 秒标为过期，串口断开显示离线并继续重试，旧数值不能证明设备仍在线。
+
+## ESP32-S3 N16R8 快速使用
+
+对应当前 `D:/ESP/ESP-S3-WIFI` 固件。GUI 原默认仍为 C5 配置；S3 使用时先在电脑配置下拉框选择 `s3-client` 并点击“加载”，或在网络页选择 **ESP32-S3** 并设置所需电脑网络角色。
+
+| 项目 | 当前 S3 | C5 |
+| --- | --- | --- |
+| 频段 | 仅 2.4 GHz，`band=0`，信道 1～13 | 保留 2.4/5 GHz/AUTO |
+| 配网按键 | GPIO4，长按至少 3 秒后松开 | GPIO24 |
+| 原生 USB | GPIO19 D− / GPIO20 D+ | GPIO13 D− / GPIO14 D+ |
+| 配网热点 | `ESP32-S3-Setup` | `ESP32-C5-Setup` |
+| 出厂 AP 密码 | `change-me-s3` | `change-me-c5` |
+| 业务 AP / TCP | `ESP32-S3-Bridge`，`192.168.4.1:8080` | 按 C5 保存配置 |
+
+**USB 单线配置**：选择 ESP32-S3，进入“ESP32-S3 用户配置”，选择 USB 和原生 USB 的 COM，点击“连接 / 应用 USB”。长按 GPIO4 松开进入配网，点击“读取 ESP32-S3”；无需启动业务桥接。编辑后点击“保存并重启 ESP32-S3”并确认。USB 日志与配置只占用一个连接，使用前退出其他占用该 COM 的 monitor 或工具。
+
+**HTTP 配置**：进入配网后，电脑连接 `ESP32-S3-Setup`，使用当前 AP 密码，地址为 `http://192.168.4.1/`。USB/HTTP 都只能在配网模式配置。保存结果不明时先重新进入配网读取核对，不自动重发。
+
+USB 根据 hello 的真实型号严格匹配所选 C5/S3，错选型号会拒绝读取和保存。两者目前共用 `C5CFG ` v2 前缀及 `X-C5-Session` HTTP 保存头，名称不表示把 S3 伪装成 C5。现有 HTTP API 没有型号字段，HTTP 按所选设备能力校验，须自行确认目标地址。
+
+S3 配置页仅显示 2.4 GHz，客户端读取、编辑、导入和保存也校验频段；不把 5 GHz 或 AUTO 静默转换。切换型号、地址、配置连接方式或 USB COM 会清除读取依据及密码编辑；切回原选项也需要重新读取，旧异步结果不会填回当前页面。USB 重连会使旧读取失效。
+
+新备份使用 `wifi-bridge-user-config-v1`，记录设备类型且不含密码和会话；仍可导入旧 `c5-user-config-v1`。跨型号导入按当前选择的能力校验：2.4 GHz 配置可复用，S3 拒绝 5 GHz/AUTO，导入只更新编辑区。
+
+S3 profiles：
+
+| 配置名称 | 电脑角色 | 适用情况 |
+| --- | --- | --- |
+| `s3-client` | TCP 客户端，连接 `192.168.4.1:8080` | 匹配 S3 出厂 UART 模式及 SPI 默认 TCP 监听 |
+| `s3-spi-tcp` | TCP 服务端，监听 `0.0.0.0:8080` | 主控已命令 S3 主动连接电脑 |
+| `s3-spi-udp` | UDP，固定对端 `192.168.137.200:6060` | 主控已建立对应 UDP Socket，地址按实际网络修改 |
+| `s3-capture` | TCP 客户端，仅接收文件 | 保存到新建 `received-s3.bin`，文件必须不存在 |
+
+```powershell
+# 编辑 COM1 为自己的业务 COM；也可使用已创建虚拟 COM 对的一端
+py -3 -B tcp2com.py --config tcp2com_config.json --profile s3-client --com COM5
+# 同时采集原生 USB 日志，USB COM 必须与业务 COM 不同
+py -3 -B tcp2com.py --device s3 --host 192.168.4.1 --port 8080 --com COM5 --baud 1152000 --usb-port COM8 --usb-log s3-usb.log
+# 仅接收二进制；或双击启动_S3.bat，默认加载 s3-client
+py -3 -B tcp2com.py --config tcp2com_config.json --profile s3-capture
+```
+
+电脑连接 S3 热点或配置电脑移动热点时使用 **2.4 GHz**。S3 UART0 是 GPIO11 TX / GPIO12 RX，不是开发板上常见 GPIO43/44。S3/C5 均禁用 ESP-01S 的 TCP 8081 复位入口。
+
+SPI 必须在主控集成 S3 固件仓库 `compat/zf_wifi_spi_s3.c`，需要 CS 忙确认、DMA 线长补齐及信用流控；原版/C5 适配文件不能替代。上位机兼容不能代替主控适配。接线及集成说明见 `D:/ESP/ESP-S3-WIFI/compat/README.md`；本次未改固件或车端。
+
+兼容保留 `C5Client(url, timeout=4)`、`C5USBClient(monitor, timeout=4)` 和既有导入路径；新调用可传 `device="s3"`。固件仓库原有 S3 命令行配置入口仍可使用，GUI 现在可直接配置 S3。
 
 ## 在 GUI 中读取和修改 C5 配置
 
@@ -256,3 +303,18 @@ py -3 -B -X utf8 -m unittest discover -s tests -v
 2026-10-22 审查修复回归：98 项测试通过，无跳过。新增验证阻塞串口读取跨重连时丢弃旧数据、新会话接收就绪后才转发、HTTP 旧启动/配网标识拒绝、前导零地址拒绝及多行 USB 统计不串字段。活动 `session` 与 `drops.session`、两个方向的 `queue.*.peak` 和 `rate.*` 分别显示；未知记录继续保留原始日志，不覆盖既有统计。
 
 SPI 连续双向无损流控需要在 CH32 使用 C5 仓库的 `compat/zf_wifi_spi_c5.c` 适配层，并更新 C5 固件，业务仍调用原 `wifi_spi_*` 接口。它按 FIFO 空间协商接收额度，发送队列满时仍允许接收/控制；业务须保留 `send_buffer` 返回的未发送尾部并稍后重试。仅更新电脑端无法修复原 ZF 驱动 FIFO 溢出。接入步骤见 `D:/ESP/ESP-C5-WFI/compat/README.md`。
+
+## 2026-10-24 S3 兼容验证
+
+此前的 10 文件修复已提交为 `2482aad`（修复重连数据隔离、配置会话校验与 USB 统计），提交前 98 项测试通过。S3 兼容改动单独形成后续提交，保留清晰的基线与迁移边界。
+
+完整回归现为 **123 项，通过、无跳过**，包括真实 Tk 界面、C5/S3 能力差异、USB 型号不匹配、频段限制、配置导入、跨设备切换、旧异步结果及 USB 断线后的读取失效，以及 S3 TCP 二进制回环和重连。
+
+```powershell
+py -3 -B -X utf8 -m unittest discover -s tests -q
+# 使用现有固件仓库构建出的生产 C 解析器夹具，不改固件源码
+py -3 -B tools/test-firmware-config.py --device s3 --fixture D:/ESP/ESP-S3-WIFI/build/host/usb_config_fixture.exe
+py -3 -B tools/test-firmware-config.py --device c5 --fixture D:/ESP/ESP-C5-WFI/build/host/usb_config_fixture.exe
+```
+
+两款生产 C 解析器与本次客户端/USB 工作线程配对通过，另验证 S3 固件仓库原有命令行配置工具仍兼容。夹具运行模拟串口、NVS 和定时器，不等于真实 USB 或 SPI 验证。没有修改固件/车端，没有烧录，实际 USB 热插拔、Wi-Fi 吞吐及长时间板端联调仍未执行。

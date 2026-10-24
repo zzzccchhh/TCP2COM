@@ -1,4 +1,4 @@
-"""C5 setup API and password-free configuration snapshots (no automatic POST retry)."""
+"""C5/S3 setup API and password-free snapshots (no automatic POST retry)."""
 
 import copy
 import http.client
@@ -8,6 +8,7 @@ import re
 from urllib.parse import urlsplit
 
 from bridge_settings import _unique_object
+from device_capabilities import capabilities
 
 
 class ConfigError(ValueError):
@@ -23,7 +24,7 @@ TOP_FIELDS = ("link_mode", "mode", "band", "baud", "tcp_port", "ap_channel",
 STATION_FIELDS = ("ssid", "static_ip", "ip", "gateway", "netmask", "dns")
 
 
-def public_config(document):
+def public_config(document, device="c5"):
     """Whitelist snapshots, so passwords and future private fields cannot leak to disk."""
     if not isinstance(document, dict):
         raise ConfigError("配置必须是 JSON 对象")
@@ -33,7 +34,7 @@ def public_config(document):
             result[name] = {key: copy.deepcopy(document[name][key]) for key in STATION_FIELDS}
     except (KeyError, TypeError) as exc:
         raise ConfigError("配置缺少必要字段，请检查固件版本") from exc
-    validate_config(result)
+    validate_config(result, device)
     return result
 
 
@@ -74,12 +75,14 @@ def _network(ip, gateway, netmask, ap=False):
         raise ConfigError("STA IP 不能与网关相同")
 
 
-def validate_config(config):
+def validate_config(config, device="c5"):
     for key, low, high in (("link_mode", 0, 1), ("mode", 0, 2), ("band", 0, 2),
                            ("baud", 9600, 5000000), ("tcp_port", 1024, 65535), ("ap_channel", 1, 165)):
         if type(config.get(key)) is not int or not low <= config[key] <= high:
             raise ConfigError(f"{key} 必须为 {low}～{high} 的整数")
     _text(config.get("ap_ssid"), "AP SSID", 32, 1)
+    if config["band"] not in capabilities(device).bands:
+        raise ConfigError(f"{capabilities(device).label} 仅支持 2.4 GHz，频段必须为 0")
     if "ap_password" in config:
         _text(config["ap_password"], "AP 密码", 63, 8)
     channels = (36, 40, 44, 48, 149, 153, 157, 161, 165) if config["band"] == 1 else range(1, 14)
@@ -103,10 +106,10 @@ def validate_config(config):
             _address(station["dns"])
 
 
-def changed_config(baseline, edited, passwords=None, clear_passwords=()):
+def changed_config(baseline, edited, passwords=None, clear_passwords=(), device="c5"):
     """Omitted/blank passwords preserve the existing secret; clearing is explicit."""
-    base = public_config(baseline)
-    candidate = public_config(edited)
+    base = public_config(baseline, device)
+    candidate = public_config(edited, device)
     passwords = passwords or {}
     for name in ("ap", "pc", "shared"):
         value = passwords.get(name, "")
@@ -120,7 +123,7 @@ def changed_config(baseline, edited, passwords=None, clear_passwords=()):
             candidate["ap_password"] = value
         else:
             candidate[name]["password"] = value
-    validate_config(candidate)
+    validate_config(candidate, device)
     patch = {key: candidate[key] for key in TOP_FIELDS if candidate[key] != base[key]}
     if "ap_password" in candidate:
         patch["ap_password"] = candidate["ap_password"]
@@ -133,8 +136,31 @@ def changed_config(baseline, edited, passwords=None, clear_passwords=()):
     return patch
 
 
+def validate_patch(patch, device, baseline=None):
+    if not isinstance(patch, dict):
+        raise ConfigError("修改内容必须是 JSON 对象")
+    if "band" in patch and (type(patch["band"]) is not int or patch["band"] not in capabilities(device).bands):
+        raise ConfigError(f"{capabilities(device).label} 不支持该频段")
+    if device == "s3" and "ap_channel" in patch and (
+            type(patch["ap_channel"]) is not int or not 1 <= patch["ap_channel"] <= 13):
+        raise ConfigError("S3 的 2.4 GHz 信道必须为 1～13")
+    if baseline is not None:
+        merged = copy.deepcopy(baseline)
+        for key, value in patch.items():
+            if key in ("pc", "shared"):
+                if not isinstance(value, dict):
+                    raise ConfigError(f"{key} 必须是对象")
+                merged[key].update(value)
+            else:
+                merged[key] = value
+        validate_config(merged, device)
+
+
 class C5Client:
-    def __init__(self, url, timeout=4):
+    def __init__(self, url, timeout=4, *, device="c5"):
+        self.device = device
+        self.capabilities = capabilities(device)
+        self.baseline = None
         parts = urlsplit(url)
         if (parts.scheme not in ("http", "https") or not parts.hostname or parts.username
                 or parts.password or parts.query or parts.fragment or parts.path not in ("", "/", "/api/config")):
@@ -171,7 +197,7 @@ class C5Client:
             connection.request(method, "/api/config", body=body, headers=headers)
             response = connection.getresponse()
             if response.status == 403:
-                raise ConfigError("403：长按 GPIO24 至少 3 秒后松开，连接 ESP32-C5-Setup，再读取配置")
+                raise ConfigError(f"403：{self.capabilities.setup_hint}")
             if response.status == 503:
                 raise ConfigError("503：配网会话已失效或设备正在重启，请重新进入配网并读取")
             if response.status != 200:
@@ -196,17 +222,20 @@ class C5Client:
             connection.close()
 
     def read(self):
+        self.baseline = None
         self.http_session = None
         self.identity = self.identity[:3]
         document = self._request("GET")
-        result = public_config(document)
+        result = public_config(document, self.device)
         self.bind_session(document.get("http_session"))
         result["config_source"] = str(document.get("config_source", "unknown"))
+        self.baseline = copy.deepcopy(result)
         return result
 
     def save(self, patch):
         if self.http_session is None:
             raise ConfigError("请先从当前设备读取配置，再保存")
+        validate_patch(patch, self.device, self.baseline)
         result = self._request("POST", patch)
         if result.get("saved") is not True or result.get("restart") is not True:
             raise SaveOutcomeUnknown("保存结果待确认：未收到 saved/restart 确认，请重新进入配置热点读取")
