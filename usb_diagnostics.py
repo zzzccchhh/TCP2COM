@@ -13,6 +13,7 @@ from c5_config import ConfigError, SaveOutcomeUnknown
 from device_capabilities import capabilities
 
 PREFIX = b"C5CFG "
+BRIDGE_PREFIX = b"BRIDGECFG "
 
 
 def parse_stats(line):
@@ -50,6 +51,7 @@ def parse_stats(line):
 class USBMonitor:
     def __init__(self, port, baud, notify, logfile=None, *, device="c5"):
         self.capabilities = capabilities(device)
+        self.config_prefix = PREFIX
         self.port = port
         self.baud = baud
         self.notify = notify
@@ -104,11 +106,17 @@ class USBMonitor:
                 envelope["patch"] = patch
             if boot is not None:
                 envelope["boot"] = boot
-            packet = b"\n" + PREFIX + json.dumps(envelope, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8") + b"\n"
-            if len(packet) - 2 > 2304:
+            encoded_envelope = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+            packet = b"\n" + self.config_prefix + encoded_envelope + b"\n"
+            alternate_packet = None
+            if operation == "hello" and self.capabilities.label == "ESP32-S3":
+                alternate = BRIDGE_PREFIX if self.config_prefix == PREFIX else PREFIX
+                alternate_packet = b"\n" + alternate + encoded_envelope + b"\n"
+            if len(encoded_envelope) + len(self.config_prefix) > 2304:
                 raise ConfigError("USB 配置报文过长")
             request = {"id": request_id, "packet": packet, "sent": False, "event": threading.Event(),
-                       "reply": None, "failed": False, "operation": operation, "deadline": time.monotonic() + timeout}
+                       "reply": None, "failed": False, "operation": operation, "deadline": time.monotonic() + timeout,
+                       "alternate": alternate_packet, "probe_at": time.monotonic() + timeout / 2}
             with self.lock:
                 if not self.connected or self.stop_event.is_set() or (generation is not None and generation != self.generation):
                     raise ConfigError("USB 连接已改变，请重新连接并读取设备")
@@ -131,22 +139,28 @@ class USBMonitor:
     def _send_request(self, device):
         with self.lock:
             request = self.pending
-            if not request or request["sent"] or request["deadline"] <= time.monotonic():
+            if not request or request["deadline"] <= time.monotonic():
                 return
-            # Mark before write: a partial/failed write may still reach the board.
-            request["sent"] = True
-            packet = request["packet"]
+            if request["sent"]:
+                if not request.get("alternate") or request["probe_at"] > time.monotonic():
+                    return
+                packet = request.pop("alternate")
+            else:
+                # Mark before write: a partial/failed write may reach the board.
+                request["sent"] = True
+                packet = request["packet"]
         if device.write(packet) != len(packet):
             raise OSError("partial USB configuration write")
 
     def _config_line(self, raw):
-        if not raw.startswith(PREFIX):
+        prefix = next((p for p in (PREFIX, BRIDGE_PREFIX) if raw.startswith(p)), None)
+        if prefix is None:
             return False
         if len(raw) > 8192:
             return True
         # Never put protocol packets (including malformed/echoed requests) in logs.
         try:
-            frame = json.loads(raw[len(PREFIX):].decode("utf-8"), object_pairs_hook=_unique_object)
+            frame = json.loads(raw[len(prefix):].decode("utf-8"), object_pairs_hook=_unique_object)
             if (not isinstance(frame, dict) or type(frame.get("v")) is not int or frame["v"] != 2
                     or type(frame.get("session")) is not int or not 1 <= frame["session"] <= 0xffffffff
                     or type(frame.get("ok")) is not bool or not isinstance(frame.get("boot"), str)
@@ -158,6 +172,7 @@ class USBMonitor:
             request = self.pending
             if request and request["sent"] and frame.get("id") == request["id"]:
                 if request["operation"] == "hello":
+                    self.config_prefix = prefix
                     result = frame.get("result")
                     self.device_model = result.get("device") if frame["ok"] and isinstance(result, dict) else None
                 self.boot = frame["boot"]
@@ -169,6 +184,7 @@ class USBMonitor:
     def _disconnected(self):
         with self.lock:
             self.connected = False
+            self.config_prefix = PREFIX
             self.boot = None
             self.session = None
             self.device_model = None

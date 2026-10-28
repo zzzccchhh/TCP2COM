@@ -22,7 +22,7 @@ class C5USBClient:
             code = frame.get("code")
             if code == "save_unknown" or (operation == "save" and code not in ("invalid", "busy", "stale")):
                 raise SaveOutcomeUnknown("保存结果待确认：未收到有效保存确认，请重连后读取核对")
-            messages = {"busy": "设备正在重启，请恢复后重新进入配网并读取",
+            messages = {"busy": "配置修订号已变化或设备正在重启，请重新进入配网并读取",
                         "stale": "设备已重启或配网会话已改变，当前编辑依据失效，请重新读取",
                         "invalid": "设备拒绝配置：参数、字段或协议版本不正确",
                         "memory": "设备内存不足，请稍后重新读取"}
@@ -61,6 +61,9 @@ class C5USBClient:
         if self.explicit_device and self.monitor.config_device() != self.capabilities.label:
             raise ConfigError("USB 型号与所选设备不匹配，请重新读取")
         validate_patch(patch, self.device, self.baseline)
+        patch = copy.deepcopy(patch)
+        if self.baseline and "revision" in self.baseline:
+            patch["revision"] = self.baseline["revision"]
         _, validation = self._request("validate", patch)
         if validation.get("valid") is not True:
             raise ConfigError("设备未确认配置校验通过，未发送保存命令")

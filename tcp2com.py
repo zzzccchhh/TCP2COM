@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ESP-01S / ESP32-C5 / ESP32-S3 TCP、UDP <-> COM 双向桥接与原始数据接收。
+"""ESP-01S / ESP32-C5 / ESP32-S3 TCP、UDP <-> COM 双向桥接。
 
 特性：
 - TCP -> 串口、串口 -> TCP 双向透传
@@ -58,9 +58,6 @@ SERIAL_WRITE_CHUNK_BYTES = 4 * 1024
 RATE_WINDOW_SECONDS = 1.0
 WARN_INTERVAL = 3.0
 
-
-class CaptureWriteError(OSError):
-    pass
 
 _BYTESIZES = {
     "5": serial.FIVEBITS,
@@ -360,7 +357,6 @@ class App:
         self.args = args
         self.ui = ui
         self.ser = None
-        self.capture = None
         self.server = None
         self.udp = None
         self.usb = None
@@ -382,20 +378,16 @@ class App:
 
     def start(self) -> bool:
         try:
-            if self.args.com:
-                self.ser = serial.serial_for_url(
-                    self.args.com,
-                    baudrate=self.args.baud,
-                    bytesize=_BYTESIZES[self.args.bytesize],
-                    parity=_PARITIES[self.args.parity],
-                    stopbits=_STOPBITS[self.args.stopbits],
-                    timeout=self.args.timeout,
-                    write_timeout=self.args.write_timeout,
-                    **flow_kwargs(self.args.flow),
-                )
-            else:
-                # Exclusive creation protects existing recordings from accidental overwrite.
-                self.capture = open(self.args.capture, "xb", buffering=0)
+            self.ser = serial.serial_for_url(
+                self.args.com,
+                baudrate=self.args.baud,
+                bytesize=_BYTESIZES[self.args.bytesize],
+                parity=_PARITIES[self.args.parity],
+                stopbits=_STOPBITS[self.args.stopbits],
+                timeout=self.args.timeout,
+                write_timeout=self.args.write_timeout,
+                **flow_kwargs(self.args.flow),
+            )
             if self.args.mode == "tcp-server":
                 self.server = TCPServer((self.args.listen, self.args.port), self.ui.message, self.args.host)
             elif self.args.mode == "udp":
@@ -403,18 +395,17 @@ class App:
                                           (self.args.host, self.args.peer_port), self.args.udp_payload,
                                           self.close_event, self._udp_record)
         except (serial.SerialException, OSError, ValueError) as exc:
-            self.ui.message(f"启动失败：{exc}；请检查端口占用、地址和输出文件")
+            self.ui.message(f"启动失败：{exc}；请检查串口占用及网络地址")
             self.exit_code = 1
             self.stop()
             return False
 
         workers = [
             (self._tcp_recv_worker, "tcp-recv"),
+            (self._serial_write_worker, "serial-write"),
+            (self._serial_read_worker, "serial-read"),
+            (self._tcp_send_worker, "tcp-send"),
         ]
-        if self.ser is not None:
-            workers.extend(((self._serial_write_worker, "serial-write"),
-                            (self._serial_read_worker, "serial-read"),
-                            (self._tcp_send_worker, "tcp-send")))
         for target, name in workers:
             thread = threading.Thread(target=target, name=name, daemon=True)
             thread.start()
@@ -434,8 +425,6 @@ class App:
                 self.ui.message("CH32 目标填写电脑热点/局域网 IPv4 地址（不是 0.0.0.0），并先启动本程序；断线后需主控重新连接")
             else:
                 self.ui.message(f"UDP 固定对端 {self.args.host}:{self.args.peer_port}；报文载荷 {self.args.udp_payload} B；不保证送达/顺序")
-        if self.capture:
-            self.ui.message(f"仅网络接收，原始载荷保存至：{self.args.capture}；不写入任何日志文本")
         if capabilities(self.args.device).usb:
             self.ui.message(f"{capabilities(self.args.device).label} 无 TCP 8081 远程复位；SPI 模式 GPIO12 为软件 RST 输入")
         if self.args.usb_port:
@@ -454,19 +443,6 @@ class App:
         self.stats.add(key, amount)
         if key == "udp_rx_packets":
             self.last_udp_rx = time.monotonic()
-
-    def _capture_write(self, data):
-        remaining = memoryview(data)
-        try:
-            while remaining:
-                written = self.capture.write(remaining)
-                if not written:
-                    raise OSError("文件写入没有进展")
-                self.stats.add("tcp_to_com_bytes", written)
-                remaining = remaining[written:]
-        except OSError as exc:
-            self.stats.add("tcp_to_com_drop", len(remaining))
-            raise CaptureWriteError(str(exc)) from exc
 
     def run(self) -> None:
         last = time.monotonic()
@@ -535,8 +511,6 @@ class App:
                 self.ser.close()
             except (serial.SerialException, OSError):
                 pass
-        if self.capture:
-            self.capture.close()
         values = self.stats.snapshot()
         self.ui.message(
             "退出统计：网络→本地已写入 %s（丢弃 %s）；本地→网络已发送 %s（丢弃 %s）" % (
@@ -692,15 +666,12 @@ class App:
                     # Count the actual TCP ingress separately from bytes accepted
                     # by the serial writer, so queue/backpressure can be diagnosed.
                     self.stats.add("tcp_rx_bytes", len(data))
-                    if self.capture:
-                        # Write before EOF handling: a short-lived sender must not lose its tail.
-                        self._capture_write(data)
-                    elif not self._enqueue(self.q_tcp_to_com, "tcp_to_com", generation, data):
+                    if not self._enqueue(self.q_tcp_to_com, "tcp_to_com", generation, data):
                         reason = "连接代次变化或程序退出"
                         break
             except OSError as exc:
-                reason = f"网络/文件接收异常：{exc}"
-                if not self.close_event.is_set() and (isinstance(exc, CaptureWriteError) or self.udp):
+                reason = f"网络接收异常：{exc}"
+                if not self.close_event.is_set() and self.udp:
                     self.exit_code = 1
                     self.close_event.set()
                     self.ui.message(reason)
@@ -945,7 +916,7 @@ class App:
 def build_parser(parser_class=argparse.ArgumentParser):
     parser = parser_class(
         prog="tcp2com",
-        description="ESP-01S / ESP32-C5 / ESP32-S3 TCP、UDP 与 COM 桥接及二进制接收",
+        description="ESP-01S / ESP32-C5 / ESP32-S3 TCP、UDP 与 COM 双向桥接",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--config", help="JSON 配置文件；仅显式指定时读取")
@@ -955,7 +926,6 @@ def build_parser(parser_class=argparse.ArgumentParser):
     parser.add_argument("--listen", default="0.0.0.0", help="TCP 服务端/UDP 本地 IPv4 绑定地址")
     parser.add_argument("--peer-port", type=int, default=6060, help="UDP 对端设备本地端口")
     parser.add_argument("--udp-payload", type=int, default=1200, help="本地→UDP 每包最大载荷，1～65507")
-    parser.add_argument("--capture", help="仅网络接收至新建二进制文件，与 --com 二选一")
     parser.add_argument("--usb-port", help="C5/S3 原生 USB 日志 COM；与业务 COM 不同")
     parser.add_argument("--usb-baud", type=int, default=115200, help="USB 日志串口参数")
     parser.add_argument("--usb-log", help="USB 文本日志文件，追加保存")
@@ -999,8 +969,8 @@ def parse_args(argv=None, parser_class=argparse.ArgumentParser):
         return args
     if args.mode != "tcp-server" and not args.host:
         parser.error("TCP 客户端和 UDP 需要 --host")
-    if bool(args.com) == bool(args.capture):
-        parser.error("--com 和 --capture 必须且只能选择一个")
+    if not args.com or not args.com.strip():
+        parser.error("业务桥接必须指定 --com 串口")
     if not 1 <= args.port <= 65535:
         parser.error("--port 必须在 1～65535 之间")
     if not capabilities(args.device).reset or args.mode != "tcp-client":
@@ -1027,8 +997,6 @@ def parse_args(argv=None, parser_class=argparse.ArgumentParser):
         parser.error("--usb-port 仅用于 C5/S3 原生 USB 日志")
     if args.usb_port and args.com and args.usb_port.casefold() == args.com.casefold():
         parser.error("USB 日志端口不能与业务 COM 相同")
-    if args.capture and args.usb_log and os.path.realpath(args.capture).casefold() == os.path.realpath(args.usb_log).casefold():
-        parser.error("二进制载荷与 USB 文本日志不能写到同一文件")
     try:
         socket.inet_pton(socket.AF_INET, args.listen)
     except OSError:

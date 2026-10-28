@@ -2,6 +2,7 @@
 """Chinese desktop front end; the CLI and byte forwarding engine remain shared."""
 
 from collections import deque
+from contextlib import contextmanager
 import copy
 import gc
 import json
@@ -18,6 +19,8 @@ from c5_usb_config import C5USBClient
 from device_capabilities import DEVICES, BANDS, capabilities
 from gui_support import (BridgeController, atomic_json, config_job, default_settings,
                          load_profile, read_profiles, save_profile, settings_to_args)
+from gui_state import (DRAFT_FIELDS, FORM_FIELDS, VERSION, load_state, profile_selection,
+                       restore_profile_path, save_state)
 from reset_control import ResetPanel
 from serial.tools import list_ports
 
@@ -92,7 +95,7 @@ class Form:
 
 
 class BridgeGUI:
-    def __init__(self, root, profile_path=None, controller=None):
+    def __init__(self, root, profile_path=None, controller=None, state_path=None):
         self.root = root
         self.root.title("Wi-Fi 桥接工具 · ESP32-S3 / ESP32-C5 / ESP-01S")
         self.root.geometry("1120x820")
@@ -115,7 +118,14 @@ class BridgeGUI:
         self.last_refresh = 0
         self.current_usb = None
         self.poll_job = None
-        self.profile_path = tk.StringVar(root, value=str(profile_path or BASE / "tcp2com_config.json"))
+        self._state_loading = True
+        self._device_loading = False
+        self._state_job = None
+        self._device_drafts = {}
+        self._profile_base = (Path(profile_path).resolve().parent if profile_path else BASE).resolve()
+        self._default_profile_path = Path(profile_path).resolve() if profile_path else self._profile_base / "tcp2com_config.json"
+        self._state_path = Path(state_path) if state_path is not None else self._profile_base / "tcp2com_last_state.json"
+        self.profile_path = tk.StringVar(root, value=str(self._default_profile_path))
         self.profile_name = tk.StringVar(root, value="c5-spi-tcp")
         self.status = tk.StringVar(root, value="已停止")
         self.applied = tk.StringVar(root, value="未启动")
@@ -128,14 +138,43 @@ class BridgeGUI:
         self.usb_status = tk.StringVar(root, value="USB 诊断未启动")
         self.filter_text = tk.StringVar(root)
         self.autoscroll = tk.BooleanVar(root, value=True)
-        self.output = tk.StringVar(root, value="COM 双向桥接")
+        self.state_status = tk.StringVar(root, value="界面设置会自动记住，连接需手动启动")
         self._build()
+        self._device_defaults = self._device_values()
+        saved, warning = load_state(self._state_path)
+        path_notice = None
+        if saved:
+            selection = saved.get("profile", {})
+            try:
+                restored, path_notice = restore_profile_path(selection, self._profile_base, self._default_profile_path)
+                self.profile_path.set(str(restored))
+            except (OSError, ValueError):
+                path_notice = "上次配置文件路径无效，已使用当前程序目录的默认路径"
+            if "name" in selection:
+                self.profile_name.set(selection["name"])
+            self._device_drafts = saved["device_drafts"]
         self._profile_list()
+        profile_notice = None
         try:
             self._load_profile()
-        except (ValueError, OSError):
+        except (ValueError, OSError) as exc:
             self._set_settings({**default_settings(), "device": "c5", "mode": "tcp-server", "com": "COM1"})
+            if "capture 文件接收功能已移除" in str(exc) or "capture 配置已移除" in str(exc):
+                profile_notice = "命名配置未加载：capture 文件接收功能已移除，请选择 COM 桥接配置"
+            elif saved and saved["profile"].get("path_base") == "absolute":
+                profile_notice = "命名配置未加载，请重新选择外部配置文件或检查配置名称"
+            else:
+                profile_notice = "命名配置未加载，请检查配置文件及配置名称"
+        if saved:
+            self._restore_state(saved)
+        self._state_loading = False
         self._sync()
+        # Startup must not rewrite a damaged/newer file or start any connection.
+        self._cancel_state_save()
+        notices = (["已恢复上次界面设置；连接尚未启动"] if saved else [])
+        notices.extend(note for note in (warning, path_notice, profile_notice) if note)
+        if notices:
+            self.state_status.set("；".join(notices))
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.poll_job = self.root.after(100, self.poll)
 
@@ -178,19 +217,15 @@ class BridgeGUI:
         self.network.add("peer_port", "UDP 对端端口", "6060")
         self.network.add("udp_payload", "UDP 每包最大发送字节", "1200")
         self.network.note("TCP 服务端可留空来源 IP；CH32 应填写电脑真实 IPv4，不能填写 0.0.0.0。UDP 已绑定不代表设备在线。")
-        self.local = self._tab("COM / 文件")
-        ttk.Combobox(self.local.frame, textvariable=self.output, state="readonly",
-                     values=("COM 双向桥接", "仅接收至文件")).grid(row=0, column=0, columnspan=2, sticky="ew", pady=8)
-        self.local.row = 1
+        self.local = self._tab("COM 串口")
         self.local.add("com", "业务 COM（也支持 loop://）", "COM1", serial_port=True)
-        ttk.Button(self.local.frame, text="刷新串口列表", command=self.refresh_ports).grid(row=1, column=2, padx=6)
-        self.local.add("capture", "新建二进制文件", "", browse=lambda: self.browse_field(self.local, "capture"))
+        ttk.Button(self.local.frame, text="刷新串口列表", command=self.refresh_ports).grid(row=0, column=2, padx=6)
         self.local.add("baud", "电脑本地波特率", "1152000")
         self.local.add("bytesize", "数据位", "8", ("5", "6", "7", "8"))
         self.local.add("parity", "校验位", "N", ("N", "E", "O", "M", "S"))
         self.local.add("stopbits", "停止位", "1", ("1", "1.5", "2"))
         self.local.add("flow", "流控", "none", {"无": "none", "RTS/CTS": "rtscts", "DSR/DTR": "dsrdtr"})
-        self.local.note("程序打开已有 COM，不创建虚拟串口。本地波特率不会修改设备 UART 或 CH32 SPI。接收文件必须不存在。")
+        self.local.note("程序打开已有 COM，不创建虚拟串口。本地波特率不会修改设备 UART 或 CH32 SPI。")
         self.advanced = self._tab("高级参数")
         for key, label, value in (("timeout", "COM 读超时（秒，可为 0）", "0.02"),
                                   ("write_timeout", "COM 写超时（秒）", "2"),
@@ -230,12 +265,14 @@ class BridgeGUI:
         footer.pack(fill="x")
         for variable in (self.runtime, self.address, self.rates, self.totals):
             ttk.Label(footer, textvariable=variable, wraplength=1050).pack(anchor="w")
+        ttk.Label(footer, textvariable=self.state_status, wraplength=1050).pack(anchor="w")
         for form in (self.network, self.local, self.advanced, self.usb_form):
             for variable in form.variables.values():
                 variable.trace_add("write", lambda *_: self._sync())
-        self.output.trace_add("write", lambda *_: self._sync())
         self.config_transport.trace_add("write", lambda *_: self._sync())
         self.config_url.trace_add("write", lambda *_: self._sync())
+        self.profile_path.trace_add("write", lambda *_: self._schedule_state_save())
+        self.profile_name.trace_add("write", lambda *_: self._schedule_state_save())
 
     def _tab(self, text):
         frame = ttk.Frame(self.tabs)
@@ -282,6 +319,8 @@ class BridgeGUI:
             button = ttk.Button(bar, text=text, command=callback)
             button.pack(side="left", padx=(0, 6))
             self.c5_buttons.append(button)
+        self.draft_button = ttk.Button(bar, text="恢复上次草稿", command=self.restore_device_draft)
+        self.draft_button.pack(side="left", padx=(0, 6))
         ttk.Label(bar, textvariable=self.c5_dirty, foreground="#9a3412").pack(side="right")
         tabs = ttk.Notebook(self.c5_frame)
         tabs.pack(fill="both", expand=True)
@@ -291,12 +330,21 @@ class BridgeGUI:
             tabs.add(frame, text=title)
             self.c5_forms[name] = Form(frame)
         form = self.c5_forms["common"]
-        form.note("读取的是启动配置 / NVS，不是 SPI 命令临时覆盖的运行参数。明确保存后写 NVS 并重启，业务连接会断开。")
-        form.add("link_mode", "设备业务接口", 0, {"UART0": 0, "逐飞 SPI": 1})
+        form.note("新固件读取当前运行配置；临时应用值可能尚未保存。明确保存后写 NVS 并重启，业务连接会断开。")
+        form.add("link_mode", "设备业务接口", 0, {"UART 原始透传": 0, "SPI WBR/1": 1, "UART WBR/1": 2})
         form.add("mode", "设备 Wi-Fi 联网模式", 0, {"自建热点 AP": 0, "连接电脑热点": 1, "连接共享 Wi-Fi": 2})
         form.add("band", "频段", 0, {"2.4 GHz": 0, "5 GHz": 1, "自动（AP 使用 2.4 GHz）": 2})
         form.add("baud", "设备 UART 波特率（SPI 模式保留）", "1152000")
         form.add("tcp_port", "设备默认 TCP 服务端端口", "8080")
+        for key, label, default in (
+                ("remote_ip","设备目标 IP","192.168.137.1"),
+                ("remote_port","设备目标端口","8080"),("local_port","设备本地端口（0 自动分配）","6060"),
+                ("reconnect_ms","设备重连间隔 ms","1000"),("connect_timeout_ms","设备连接超时 ms","10000"),
+                ("up_kb","设备上行缓冲 KiB","4096"),("down_kb","设备下行缓冲 KiB","1024")):
+            form.add(key,label,default)
+        form.add("net_role","设备网络角色",0,{"TCP 服务端":0,"TCP 客户端":1,"UDP":2})
+        form.add("auto_reconnect","设备自动重连",True,boolean=True)
+        form.note("上行 64～6144 KiB、下行 64～2048 KiB，总和最多 6144 KiB。接口、波特率和队列容量需重启生效。")
         ap = self.c5_forms["ap"]
         ap.note("密码留空保留原密码；设备不返回旧密码。AP 不支持开放网络。更改业务 AP IP 不改变配置热点地址。")
         for key, label in (("ap_ssid", "SSID"), ("ap_password", "新密码（8～63 字节，留空保留）"),
@@ -314,7 +362,7 @@ class BridgeGUI:
             station.variables["static_ip"].trace_add("write", lambda *_, name=name: self._station_sync(name))
         for form in self.c5_forms.values():
             for variable in form.variables.values():
-                variable.trace_add("write", lambda *_: self._c5_changes())
+                variable.trace_add("write", lambda *_: self._device_form_changed())
 
     def _build_logs(self):
         frame = ttk.Frame(self.tabs, padding=8)
@@ -333,14 +381,110 @@ class BridgeGUI:
         self.log_text.pack(fill="both", expand=True)
         self.filter_text.trace_add("write", lambda *_: setattr(self, "log_dirty", True))
 
+    @contextmanager
+    def _pause_device(self):
+        previous = self._device_loading
+        self._device_loading = True
+        try:
+            yield
+        finally:
+            self._device_loading = previous
+
+    def _device_values(self):
+        return {group: {key: form.get(key) for key in DRAFT_FIELDS[group] if key in form.variables}
+                for group, form in self.c5_forms.items()}
+
+    def _remember_device_draft(self, only_if_missing=False):
+        if self._state_loading or self._device_loading or self.closing:
+            return
+        device = self.network.get("device")
+        if device not in ("c5", "s3") or (only_if_missing and device in self._device_drafts):
+            return
+        self._device_drafts[device] = self._device_values()
+        self._schedule_state_save()
+        self.draft_button.configure(state="normal" if not self.http_busy else "disabled")
+
+    def _device_form_changed(self):
+        if self._state_loading or self._device_loading:
+            return
+        self._c5_changes()
+        self._remember_device_draft()
+
+    def _apply_device_draft(self, draft):
+        with self._pause_device():
+            for group, fields in draft.items():
+                if group not in self.c5_forms:
+                    continue
+                for key, value in fields.items():
+                    if key in DRAFT_FIELDS[group] and key in self.c5_forms[group].variables:
+                        self.c5_forms[group].set(key, value)
+            self._clear_passwords()
+            for name in ("pc", "shared"):
+                self._station_sync(name)
+        self._c5_changes()
+
+    def restore_device_draft(self):
+        if self.http_busy or self.closing:
+            return
+        draft = self._device_drafts.get(self.network.get("device"))
+        if draft is not None:
+            self._apply_device_draft(draft)
+            self.c5_status.set("已恢复上次草稿；" + ("基于本次读取，尚未保存到设备" if self.baseline is not None
+                                                   else "尚未读取设备，保存前请重新读取"))
+            self._schedule_state_save()
+
+    def _restore_state(self, saved):
+        for name, fields in saved["forms"].items():
+            form = getattr(self, name)
+            for key, value in fields.items():
+                form.set(key, value)
+        if "config_url" in saved:
+            self.config_url.set(saved["config_url"])
+        if "config_transport" in saved:
+            self.config_transport.set("USB" if saved["config_transport"] == "usb" else "Wi-Fi HTTP")
+
+    def _state_snapshot(self):
+        return {"version": VERSION,
+                "profile": profile_selection(self.profile_path.get(), self.profile_name.get(), self._profile_base),
+                "forms": {name: {key: getattr(self, name).get(key) for key in fields}
+                          for name, fields in FORM_FIELDS.items()},
+                "config_transport": "usb" if self.config_transport.get() == "USB" else "http",
+                "config_url": self.config_url.get(), "device_drafts": self._device_drafts}
+
+    def _cancel_state_save(self):
+        if self._state_job is not None:
+            self.root.after_cancel(self._state_job)
+            self._state_job = None
+
+    def _schedule_state_save(self):
+        if self._state_loading or self.closing:
+            return
+        self._cancel_state_save()
+        self._state_job = self.root.after(500, self._save_last_state)
+
+    def _save_last_state(self):
+        self._cancel_state_save()
+        try:
+            save_state(self._state_path, self._state_snapshot())
+            self.state_status.set("已记住界面设置；下次启动自动恢复")
+        except (OSError, ValueError):
+            # Local persistence failures must not stop forwarding or closing.
+            self.state_status.set("无法保存上次设置，请检查状态文件位置和目录权限")
+
     def _set_settings(self, settings):
         values = {**default_settings(), **settings}
-        for form in (self.network, self.local, self.advanced, self.usb_form):
-            for key in form.variables:
-                form.set(key, values.get(key))
-        self.config_url.set(values["config_url"])
-        self.config_transport.set("USB" if values["config_transport"] == "usb" else "Wi-Fi HTTP")
-        self.output.set("仅接收至文件" if values.get("capture") else "COM 双向桥接")
+        previous = self._state_loading
+        self._state_loading = True
+        try:
+            for form in (self.network, self.local, self.advanced, self.usb_form):
+                for key in form.variables:
+                    form.set(key, values.get(key))
+            self.config_url.set(values["config_url"])
+            self.config_transport.set("USB" if values["config_transport"] == "usb" else "Wi-Fi HTTP")
+        finally:
+            self._state_loading = previous
+        if not previous:
+            self._sync()
 
     def settings(self):
         result = {}
@@ -350,16 +494,12 @@ class BridgeGUI:
         result["config_transport"] = "usb" if self.config_transport.get() == "USB" else "http"
         if result["config_transport"] == "http":
             C5Client(result["config_url"])
-        if self.output.get() == "仅接收至文件":
-            result["com"] = None
-        else:
-            result["capture"] = None
         if not capabilities(result["device"]).usb:
             result["usb_port"] = result["usb_log"] = None
         return result
 
     def _sync(self):
-        if not hasattr(self, "usb_form"):
+        if self._state_loading or not hasattr(self, "usb_form"):
             return
         device = self.network.get("device")
         caps = capabilities(device)
@@ -370,10 +510,17 @@ class BridgeGUI:
             self._invalidate_config()
             self.c5_status.set("设备或配置连接已改变，请重新读取")
             if device_changed and caps.usb:
-                form = self.c5_forms["common"]
-                form.options["band"] = {label: value for label, value in BANDS.items() if value in caps.bands}
-                form.widgets["band"].configure(values=list(form.options["band"]))
-                form.set("band", 0)
+                with self._pause_device():
+                    form = self.c5_forms["common"]
+                    form.options["band"] = {label: value for label, value in BANDS.items() if value in caps.bands}
+                    form.widgets["band"].configure(values=list(form.options["band"]))
+                    form.options["link_mode"] = {"UART 原始透传":0,"SPI WBR/1":1,"UART WBR/1":2}
+                    form.widgets["link_mode"].configure(values=list(form.options["link_mode"]))
+                    self._apply_device_draft(self._device_defaults)
+                    draft = self._device_drafts.get(device)
+                    if draft is not None:
+                        self._apply_device_draft(draft)
+                        self.c5_status.set("已恢复上次编辑草稿；尚未读取设备，保存前请重新读取")
         self.setup_hint.set(caps.setup_hint if caps.usb else "ESP-01S 使用原有透传与复位功能。")
         self.tabs.tab(self.c5_frame, text=f"{caps.label} 用户配置" if caps.usb else "设备用户配置")
         self.c5_buttons[1].configure(text=f"读取 {caps.label}")
@@ -382,9 +529,6 @@ class BridgeGUI:
         self.network.enable("listen", mode != "tcp-client")
         for key in ("peer_port", "udp_payload"):
             self.network.enable(key, mode == "udp")
-        self.local.enable("capture", self.output.get() == "仅接收至文件")
-        for key in ("com", "baud", "bytesize", "parity", "stopbits", "flow"):
-            self.local.enable(key, self.output.get() == "COM 双向桥接")
         for key in self.usb_form.variables:
             self.usb_form.enable(key, caps.usb)
         for key in ("control_port", "no_reset_ui"):
@@ -396,6 +540,7 @@ class BridgeGUI:
             self._clear_passwords()
             self.c5_status.set("请选择 C5/S3 设备后读取配置")
         self._c5_enable()
+        self._schedule_state_save()
 
     def _invalidate_config(self):
         self.context_epoch += 1
@@ -418,6 +563,11 @@ class BridgeGUI:
         self.c5_usb_combo.configure(state="normal" if enabled and usb else "disabled")
         self.usb_connect_button.configure(state="normal" if enabled and usb else "disabled")
         self.network.widgets["device"].configure(state="disabled" if self.http_busy else "readonly")
+        self.draft_button.configure(state="normal" if enabled and self.network.get("device") in self._device_drafts
+                                    else "disabled")
+        for key in ("net_role","auto_reconnect","remote_ip","remote_port","local_port",
+                    "reconnect_ms","connect_timeout_ms","up_kb","down_kb"):
+            self.c5_forms["common"].enable(key,enabled and self.baseline is not None and key in self.baseline)
         self._c5_changes()
 
     def _c5_changes(self):
@@ -429,18 +579,24 @@ class BridgeGUI:
                          **{name: self.c5_forms[name].get("password") for name in ("pc", "shared")}}
             clear = [name for name in ("pc", "shared") if self.c5_forms[name].get("clear_password")]
             dirty = changed_config(self.baseline, self.edited_c5(), passwords, clear, device=self.network.get("device"))
-            self.c5_dirty.set("已修改，尚未保存" if dirty else "与上次读取一致")
+            needs_save = self.baseline.get("unsaved") or self.baseline.get("migration_requires_setup")
+            self.c5_dirty.set("已修改，尚未保存" if dirty else
+                              "当前配置待明确保存并重启" if needs_save else "与上次读取一致")
         except ValueError:
             self.c5_dirty.set("编辑未保存，请检查参数")
 
+    def _profile_file(self):
+        # Typed relative paths use the same base as restored paths, regardless of cwd.
+        return (self._profile_base / self.profile_path.get()).resolve()
+
     def _profile_list(self):
         try:
-            self.profile_combo.configure(values=list(read_profiles(self.profile_path.get())))
+            self.profile_combo.configure(values=list(read_profiles(self._profile_file())))
         except (ValueError, OSError):
             self.profile_combo.configure(values=())
 
     def _load_profile(self):
-        self._set_settings(load_profile(self.profile_path.get(), self.profile_name.get()))
+        self._set_settings(load_profile(self._profile_file(), self.profile_name.get()))
         self._sync()
 
     def load_profile(self):
@@ -468,7 +624,7 @@ class BridgeGUI:
 
     def save_profile(self):
         try:
-            save_profile(self.profile_path.get(), self.profile_name.get(), self.settings())
+            save_profile(self._profile_file(), self.profile_name.get(), self.settings())
             self._profile_list()
             self.controller.ui.message("电脑配置已保存；未改变运行参数，未写入设备")
         except (ValueError, OSError) as exc:
@@ -480,14 +636,14 @@ class BridgeGUI:
             previous = self.profile_path.get()
             self.profile_path.set(path)
             try:
-                save_profile(path, self.profile_name.get(), self.settings())
+                save_profile(self._profile_file(), self.profile_name.get(), self.settings())
                 self._profile_list()
             except (ValueError, OSError) as exc:
                 self.profile_path.set(previous)
                 self.error(exc)
 
     def browse_field(self, form, key):
-        path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".bin" if key == "capture" else ".log")
+        path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".log")
         if path:
             form.set(key, path)
 
@@ -603,26 +759,31 @@ class BridgeGUI:
             self.error(exc)
 
     def _clear_passwords(self):
-        self.c5_forms["ap"].set("ap_password", "")
-        for name in ("pc", "shared"):
-            self.c5_forms[name].set("password", "")
-            self.c5_forms[name].set("clear_password", False)
+        with self._pause_device():
+            self.c5_forms["ap"].set("ap_password", "")
+            for name in ("pc", "shared"):
+                self.c5_forms[name].set("password", "")
+                self.c5_forms[name].set("clear_password", False)
 
     def _fill_c5(self, document):
-        for name in ("common", "ap"):
-            form = self.c5_forms[name]
-            for key in form.variables:
-                if key in document:
-                    form.set(key, document[key])
-        for name in ("pc", "shared"):
-            for key, value in document[name].items():
-                self.c5_forms[name].set(key, value)
-            self._station_sync(name)
-        self._clear_passwords()
+        with self._pause_device():
+            for name in ("common", "ap"):
+                form = self.c5_forms[name]
+                for key in form.variables:
+                    if key in document:
+                        form.set(key, document[key])
+            for name in ("pc", "shared"):
+                for key, value in document[name].items():
+                    self.c5_forms[name].set(key, value)
+                self._station_sync(name)
+            self._clear_passwords()
+        # A fresh device read must not destroy the separately saved edit draft.
+        self._remember_device_draft(only_if_missing=True)
+        self._c5_changes()
 
     def edited_c5(self):
         result = self.c5_forms["common"].values()
-        for key in ("baud", "tcp_port"):
+        for key in ("baud", "tcp_port", "remote_port", "local_port", "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb"):
             try:
                 result[key] = int(result[key])
             except ValueError as exc:
@@ -635,6 +796,11 @@ class BridgeGUI:
         for name in ("pc", "shared"):
             result[name] = {key: value for key, value in self.c5_forms[name].values().items()
                             if key not in ("password", "clear_password")}
+        if self.baseline is not None:
+            for key in ("net_role","auto_reconnect","remote_ip","remote_port","local_port",
+                        "reconnect_ms","connect_timeout_ms","up_kb","down_kb"):
+                if key not in self.baseline:
+                    result.pop(key,None)
         return public_config(result, self.network.get("device"))
 
     def save_c5(self):
@@ -646,7 +812,7 @@ class BridgeGUI:
                          **{name: self.c5_forms[name].get("password") for name in ("pc", "shared")}}
             clear = [name for name in ("pc", "shared") if self.c5_forms[name].get("clear_password")]
             patch = changed_config(self.baseline, self.edited_c5(), passwords, clear, device=self.network.get("device"))
-            if not patch:
+            if not patch and not (self.baseline.get("unsaved") or self.baseline.get("migration_requires_setup")):
                 self.c5_status.set("没有修改，无需写入 NVS")
                 return
             label = capabilities(self.network.get("device")).label
@@ -659,6 +825,7 @@ class BridgeGUI:
     def undo_c5(self):
         if self.baseline:
             self._fill_c5(self.baseline)
+            self._remember_device_draft()
             self.c5_status.set("已恢复到上次读取内容；未写入设备")
 
     def backup_c5(self):
@@ -680,6 +847,7 @@ class BridgeGUI:
             if not isinstance(document, dict) or document.get("format") not in ("c5-user-config-v1", "wifi-bridge-user-config-v1"):
                 raise ConfigError("不支持的设备备份格式（与电脑 profiles 文件不同）")
             self._fill_c5(public_config(document["config"], self.network.get("device")))
+            self._remember_device_draft()
             self.c5_status.set("已导入到编辑区；密码未导入，尚未写入设备")
         except (KeyError, ValueError, OSError) as exc:
             self.error(exc)
@@ -715,7 +883,14 @@ class BridgeGUI:
             self.read_identity = identity
             self.read_device = self.network.get("device")
             self._fill_c5(document)
-            self.c5_status.set(f"已读取启动配置 · 来源 {document['config_source']} · {time.strftime('%H:%M:%S')}；修改后需明确保存")
+            detail = f"来源 {document['config_source']}"
+            if "revision" in document:
+                detail += f" · 编辑修订 {document['revision']} · 保存修订 {document.get('saved_revision', '未知')}"
+            if document.get("unsaved"):
+                detail += " · 当前运行值尚未保存"
+            if document.get("migration_requires_setup"):
+                detail += " · 旧 SPI 恢复：业务接口已停用，请明确选择新接口后保存重启"
+            self.c5_status.set(f"已读取配置 · {detail} · {time.strftime('%H:%M:%S')}；修改后需明确保存")
         else:
             self.baseline = self.read_identity = None
             self.c5_status.set("已写入 NVS，设备即将重启；USB / HTTP 均需重新进入配网，再读取核对。普通模式 USB 只输出日志。")
@@ -788,8 +963,7 @@ class BridgeGUI:
             self.last_refresh = now
             if app:
                 self.runtime.set(f"正在使用：{app.args.device} / {app.args.mode} · "
-                                 + (f"{app.args.com} / {app.args.baud} / {app.args.bytesize}{app.args.parity}{app.args.stopbits}"
-                                    if app.args.com else f"仅接收：{app.args.capture}"))
+                                 f"{app.args.com} / {app.args.baud} / {app.args.bytesize}{app.args.parity}{app.args.stopbits}")
                 self.rates.set(self.controller.ui.rate.strip())
                 stats = app.stats.snapshot()
                 self.totals.set(f"队列 {app.q_tcp_to_com.qsize()} / {app.q_com_to_tcp.qsize()} · "
@@ -843,6 +1017,7 @@ class BridgeGUI:
     def close(self):
         if self.closing:
             return
+        self._save_last_state()
         self.closing = True
         self.status.set("正在关闭并释放资源…")
         self._reset_shutdown()
@@ -852,6 +1027,7 @@ class BridgeGUI:
             button.configure(state="disabled")
 
     def _destroy(self):
+        self._cancel_state_save()
         if self.poll_job is not None:
             self.root.after_cancel(self.poll_job)
         self.root.destroy()

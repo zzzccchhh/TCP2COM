@@ -4,3 +4,4 @@ __pycache__/
 /c5-usb.log
 /s3-usb.log
 /received-s3.bin
+/tcp2com_last_state.json

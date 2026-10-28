@@ -24,6 +24,14 @@ def example_config():
                        "netmask": "255.255.255.0", "dns": "192.168.1.1"}}
 
 
+def wbr_config(device="c5", **changes):
+    return {**example_config(), "config_api": "c5-wbr-1" if device == "c5" else "bridge-1",
+            "revision": 23, "saved_revision": 21, "unsaved": False, "migration_requires_setup": False,
+            "net_role": 0, "auto_reconnect": True, "remote_ip": "192.168.137.1", "remote_port": 8080,
+            "local_port": 6060, "reconnect_ms": 1000, "connect_timeout_ms": 10000,
+            "up_kb": 4096, "down_kb": 1024, **changes}
+
+
 class ConfigModelTests(unittest.TestCase):
     def test_changed_fields_only_preserve_passwords_and_inactive_profiles(self):
         base = example_config()
@@ -65,7 +73,7 @@ class ConfigModelTests(unittest.TestCase):
 
     def test_numeric_types_modes_and_channel_matching(self):
         base = example_config()
-        for field, value in (("link_mode", 2), ("mode", True), ("band", 3), ("baud", 9599),
+        for field, value in (("link_mode", 3), ("mode", True), ("band", 3), ("baud", 9599),
                              ("tcp_port", 1023), ("tcp_port", 65536), ("baud", 1.5), ("ap_channel", 36)):
             with self.subTest(field=field, value=value), self.assertRaises(ConfigError):
                 public_config({**base, field: value})

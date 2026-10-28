@@ -27,7 +27,8 @@ def wait_for(predicate, timeout=3):
 
 class SerialC5:
     """Fragment replies and mix logs; assert exclusive handle and worker ownership."""
-    def __init__(self, model="ESP32-C5"):
+    def __init__(self, model="ESP32-C5", prefix=b"C5CFG "):
+        self.prefix = prefix
         self.model = model
         self.incoming = queue.Queue()
         self.boot = "0123456789abcdef"
@@ -83,7 +84,9 @@ class SerialC5:
         self.writes.append(packet)
         if self.short:
             return len(packet) // 2
-        request = json.loads(packet.strip()[6:])
+        if not packet.strip().startswith(self.prefix):
+            return len(packet)
+        request = json.loads(packet.strip()[len(self.prefix):])
         self.requests.append(request)
         operation = request["op"]
         if not self.setup:
@@ -110,7 +113,7 @@ class SerialC5:
         if self.drop != operation:
             # Stale replies and stats must not satisfy the active request.
             stale = {**response, "id": "old-request"}
-            content = (b"I (1) stats: IP=192.168.4.1 ch=6 RSSI=-42 session=1\nC5CFG " + json.dumps(stale).encode() + b"\nC5CFG "
+            content = (b"I (1) stats: IP=192.168.4.1 ch=6 RSSI=-42 session=1\n" + self.prefix + json.dumps(stale).encode() + b"\n" + self.prefix
                        + json.dumps(response, ensure_ascii=False).encode() + b"\r\n")
             self.inject(content)
         return len(packet)

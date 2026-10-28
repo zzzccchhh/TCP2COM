@@ -1,6 +1,9 @@
 """S3 capabilities, actual transports and firmware-compatible setup behavior."""
 import contextlib
 import io
+import http.server
+import json
+import threading
 from pathlib import Path
 import socket
 import sys
@@ -24,7 +27,7 @@ class S3CapabilityTests(unittest.TestCase):
         factory = load_profile(path, "s3-client")
         self.assertEqual((factory["device"], factory["mode"], factory["host"], factory["port"]),
                          ("s3", "tcp-client", "192.168.4.1", 8080))
-        for name in ("s3-client", "s3-spi-tcp", "s3-spi-udp", "s3-capture"):
+        for name in ("s3-client", "s3-spi-tcp", "s3-spi-udp"):
             self.assertTrue(settings_to_args(load_profile(path, name)).no_reset_ui)
         self.assertEqual(load_profile(path, "c5-spi-tcp")["device"], "c5")
 
@@ -129,6 +132,60 @@ class S3USBTests(unittest.TestCase):
         self.assertEqual(self.device.save_count, 1)
         self.monitor.close()
         self.assertIsNone(self.monitor.config_device())
+
+
+class BridgeProtocolTests(unittest.TestCase):
+    def test_neutral_usb_prefix_negotiation_and_single_save_with_revision(self):
+        device = SerialC5(model="ESP32-S3", prefix=b"BRIDGECFG ")
+        device.config.update(config_api="bridge-1", revision=17, link_mode=2,
+                             net_role=1,remote_ip="192.168.137.1",remote_port=8080,local_port=6060,
+                             auto_reconnect=True,reconnect_ms=1000,connect_timeout_ms=10000,up_kb=4096,down_kb=1024)
+        with mock.patch("usb_diagnostics.serial.serial_for_url",return_value=device):
+            monitor=USBMonitor("COM8",115200,lambda _:None,device="s3")
+            monitor.start()
+            try:
+                wait_for(lambda:monitor.status()["connected"])
+                client=C5USBClient(monitor,timeout=.5,device="s3")
+                document=client.read()
+                self.assertEqual(document["link_mode"],2)
+                self.assertEqual(monitor.config_prefix,b"BRIDGECFG ")
+                self.assertEqual(document["revision"],17)
+                client.save({"remote_port":9000})
+                self.assertEqual(device.save_count,1)
+                self.assertEqual(device.requests[-1]["patch"],{"remote_port":9000,"revision":17})
+                self.assertTrue(all(p.startswith(b"\nBRIDGECFG ") for p in device.writes if b'"op":"save"' in p))
+            finally:
+                monitor.close()
+
+    def test_neutral_http_header_and_revision_survive_reconstructed_client(self):
+        observed=[]
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self,*_):pass
+            def do_GET(self):
+                body=json.dumps({**config_tests.wbr_config("s3",revision=19), "http_session":"0123456789abcdef-1"}).encode()
+                self.send_response(200);self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body)
+            def do_POST(self):
+                body=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                observed.append((self.headers.get("X-Bridge-Session"),body))
+                self.send_response(200);self.send_header("Content-Length",str(len(b'{"saved":true,"restart":true}')));self.end_headers();self.wfile.write(b'{"saved":true,"restart":true}')
+        server=http.server.ThreadingHTTPServer(("127.0.0.1",0),Handler)
+        thread=threading.Thread(target=server.serve_forever,kwargs={"poll_interval":.01},daemon=True);thread.start()
+        try:
+            url=f"http://127.0.0.1:{server.server_port}/"
+            original=C5Client(url,device="s3");baseline=original.read()
+            client=C5Client(url,device="s3");client.bind_session(original.http_session);client.baseline=baseline
+            client.save({"baud":921600})
+            self.assertEqual(observed,[("0123456789abcdef-1",{"baud":921600,"revision":19})])
+        finally:
+            server.shutdown();server.server_close();thread.join(1)
+
+    def test_extended_fields_validation_for_c5_and_s3(self):
+        document={**config_tests.example_config(),"link_mode":2,"remote_port":9000,"up_kb":4096,"down_kb":1024}
+        self.assertEqual(public_config(document,"s3")["remote_port"],9000)
+        self.assertEqual(public_config(document,"c5")["link_mode"],2)
+        for device in ("c5", "s3"):
+            for key,value in (("remote_port",0),("net_role",3),("up_kb",6144)):
+                with self.assertRaises(ConfigError):public_config({**document,key:value},device)
 
 
 if __name__ == "__main__":

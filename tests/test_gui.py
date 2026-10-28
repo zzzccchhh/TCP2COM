@@ -24,7 +24,7 @@ from c5_usb_config import C5USBClient
 from gui_support import BridgeController, EventUI, load_profile, save_profile, settings_to_args
 if tk is not None:
     from tcp2com_gui import BridgeGUI
-from test_c5_config import SetupHandler, example_config
+from test_c5_config import SetupHandler, example_config, wbr_config
 from test_usb_config import SerialC5
 
 
@@ -52,11 +52,12 @@ class ProfileTests(unittest.TestCase):
     def test_atomic_profile_save_preserves_other_profiles_and_resolves_files(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "local.json"
-            values = {"device": "c5", "mode": "tcp-server", "port": 8080, "capture": "raw.bin"}
+            values = {"device": "c5", "mode": "tcp-server", "port": 8080, "com": "loop://",
+                      "usb_port": "COM88", "usb_log": "first.log"}
             save_profile(path, "first", values)
-            save_profile(path, "second", {**values, "capture": "next.bin"})
+            save_profile(path, "second", {**values, "usb_log": "second.log"})
             self.assertEqual(set(json.loads(path.read_text())["profiles"]), {"first", "second"})
-            self.assertEqual(load_profile(path, "first")["capture"], str(Path(directory) / "raw.bin"))
+            self.assertEqual(load_profile(path, "first")["usb_log"], str(Path(directory) / "first.log"))
             before = path.read_bytes()
             with self.assertRaises(ValueError):
                 save_profile(path, "bad", {**values, "port": -1})
@@ -136,15 +137,13 @@ class ControllerTests(unittest.TestCase):
         self.assertIs(self.controller.snapshot()[0], app)
         self.assertFalse(monitor.thread.is_alive())
 
-    def test_failed_start_is_stopped_and_does_not_overwrite_capture(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "original.bin"
-            path.write_bytes(b"original")
-            args = settings_to_args({"device": "c5", "mode": "tcp-server", "port": free_port(), "capture": str(path)})
+    def test_failed_serial_open_stops_controller_start(self):
+        args = settings_to_args({"device": "c5", "mode": "tcp-server", "port": free_port(), "com": "missing"})
+        with mock.patch("tcp2com.serial.serial_for_url", side_effect=OSError("unavailable")):
             self.controller.submit("start", args)
             wait_for(lambda: not self.controller.snapshot()[4])
             self.assertIsNone(self.controller.snapshot()[0])
-            self.assertEqual(path.read_bytes(), b"original")
+            self.assertIsNone(self.controller.snapshot()[2])
 
 
 class GUITests(unittest.TestCase):
@@ -190,10 +189,11 @@ class GUITests(unittest.TestCase):
         self.assertEqual(str(self.gui.network.widgets["peer_port"]["state"]), "normal")
         self.gui.network.set("mode", "tcp-client")
         self.assertEqual(str(self.gui.network.widgets["listen"]["state"]), "disabled")
-        self.gui.output.set("仅接收至文件")
-        self.assertIsNone(self.gui.settings()["com"])
-        self.gui.local.set("capture", "test.bin")
-        self.assertEqual(str(self.gui.local.widgets["com"]["state"]), "disabled")
+        self.assertIn("COM 串口", [self.gui.tabs.tab(tab, "text") for tab in self.gui.tabs.tabs()])
+        self.assertNotIn("capture", self.gui.local.variables)
+        self.assertNotIn("capture", self.gui.settings())
+        self.assertEqual(self.gui.settings()["com"], "COM1")
+        self.assertEqual(str(self.gui.local.widgets["com"]["state"]), "normal")
         self.read_fixture()
         self.gui.network.set("device", "esp01s")
         self.assertIsNone(self.gui.baseline)
@@ -262,6 +262,93 @@ class GUITests(unittest.TestCase):
         wait_for(lambda: "已写入 NVS" in self.gui.c5_status.get(), self.root.update)
         self.assertEqual(device.save_count, 1)
         self.assertEqual(device.requests[-1]["patch"], {"baud": 921600})
+
+    def test_s3_new_protocol_gui_retains_network_fields_and_revision(self):
+        self.gui.network.set("device","s3")
+        device=SerialC5(model="ESP32-S3",prefix=b"BRIDGECFG ")
+        device.config.update(config_api="bridge-1",revision=23,link_mode=2,net_role=1,
+                             remote_ip="192.168.137.1",remote_port=8080,local_port=6060,
+                             auto_reconnect=True,reconnect_ms=1000,connect_timeout_ms=10000,up_kb=4096,down_kb=1024)
+        self.connect_usb_fixture(device);self.gui.read_c5()
+        wait_for(lambda:self.gui.baseline is not None,self.root.update)
+        form=self.gui.c5_forms["common"]
+        self.assertEqual(form.get("link_mode"),2)
+        self.assertEqual(form.get("remote_ip"),"192.168.137.1")
+        form.set("remote_port","9000")
+        with mock.patch("tcp2com_gui.messagebox.askokcancel",return_value=True):self.gui.save_c5()
+        wait_for(lambda:"已写入 NVS" in self.gui.c5_status.get(),self.root.update)
+        self.assertEqual(device.requests[-1]["patch"],{"remote_port":9000,"revision":23})
+
+    def test_c5_wbr_usb_gui_edits_all_network_fields_and_dual_band(self):
+        device = SerialC5()
+        device.config = wbr_config(link_mode=2)
+        self.connect_usb_fixture(device)
+        self.gui.read_c5()
+        wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        form = self.gui.c5_forms["common"]
+        self.assertEqual(set(form.options["link_mode"].values()), {0, 1, 2})
+        self.assertNotIn("逐飞", str(form.options["link_mode"]))
+        self.assertIn("编辑修订 23", self.gui.c5_status.get())
+        patch = dict(link_mode=1, band=1, net_role=2, remote_ip="192.168.137.100",
+                     remote_port=9000, local_port=0, auto_reconnect=False,
+                     reconnect_ms=2000, connect_timeout_ms=5000, up_kb=2048, down_kb=512)
+        for key, value in patch.items():
+            self.assertNotEqual(str(form.widgets[key]["state"]), "disabled")
+            form.set(key, value)
+        self.gui.c5_forms["ap"].set("ap_channel", "36")
+        with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True):
+            self.gui.save_c5()
+        wait_for(lambda: "已写入 NVS" in self.gui.c5_status.get(), self.root.update)
+        self.assertEqual(device.requests[-1]["patch"], {**patch, "ap_channel": 36, "revision": 23})
+        self.assertEqual(device.save_count, 1)
+        self.assertIsNone(self.gui.baseline)
+
+    def test_c5_wbr_gui_backup_import_and_draft_keep_network_without_session(self):
+        device = SerialC5()
+        device.config = wbr_config(link_mode=2)
+        self.connect_usb_fixture(device)
+        self.gui.read_c5()
+        wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        self.gui.c5_forms["common"].set("remote_port", "9000")
+        self.gui.c5_forms["common"].set("up_kb", "2048")
+        self.gui.c5_forms["pc"].set("password", "never-back-up")
+        path = str(Path(self.temporary.name) / "new-backup.json")
+        with mock.patch("tcp2com_gui.filedialog.asksaveasfilename", return_value=path):
+            self.gui.backup_c5()
+        text = Path(path).read_text(encoding="utf-8")
+        for secret in ("password", "never-back-up", "revision", "http_session", "migration_requires_setup"):
+            self.assertNotIn(secret, text)
+        self.gui.undo_c5()
+        with mock.patch("tcp2com_gui.filedialog.askopenfilename", return_value=path):
+            self.gui.import_c5()
+        self.assertEqual(self.gui.edited_c5()["remote_port"], 9000)
+        self.assertEqual(self.gui.edited_c5()["up_kb"], 2048)
+        self.assertEqual(self.gui.edited_c5()["link_mode"], 2)
+        self.assertEqual(self.gui.baseline["revision"], 23)
+        self.assertEqual(device.save_count, 0)
+        self.gui.network.set("device", "s3")
+        self.gui.network.set("device", "c5")
+        self.assertEqual(self.gui.c5_forms["common"].get("remote_port"), "9000")
+        self.assertEqual(self.gui.c5_forms["common"].get("link_mode"), 2)
+        self.assertIsNone(self.gui.baseline)
+
+    def test_c5_recovery_and_unsaved_runtime_values_allow_explicit_no_delta_save(self):
+        # Preserve the current read identity while simulating each firmware status.
+        for status in ("migration_requires_setup", "unsaved"):
+            document = wbr_config(**{status: True})
+            client = C5Client(self.gui.config_url.get())
+            client.bind_session("0123456789abcdef-1")
+            context = (self.gui.context_epoch, "c5")
+            self.gui.http_events.put(("read", client.identity, document, None, context))
+            self.gui._http_results()
+            if status == "migration_requires_setup":
+                self.assertIn("旧 SPI 恢复", self.gui.c5_status.get())
+            else:
+                self.assertIn("尚未保存", self.gui.c5_status.get())
+            with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True), \
+                    mock.patch.object(self.gui, "_http") as request:
+                self.gui.save_c5()
+            request.assert_called_once_with("save", {})
 
     def test_s3_rejects_c5_usb_model(self):
         self.gui.network.set("device", "s3")

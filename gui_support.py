@@ -34,6 +34,8 @@ def settings_to_args(settings):
         if key in ("config", "profile", "list_coms", "open_config"):
             continue
         if key not in actions:
+            if key == "capture":
+                raise ValueError("capture 文件接收功能已移除，请使用 COM 桥接")
             raise ValueError(f"未知配置项：{key}")
         action = actions[key]
         if value == "" and action.type in (int, float):

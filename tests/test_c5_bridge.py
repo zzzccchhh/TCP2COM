@@ -70,15 +70,16 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(c5.no_reset_ui)
         self.assertIsNone(c5.host)
 
-    def test_profiles_override_and_relative_capture_path(self):
+    def test_profiles_override_and_relative_usb_log_path(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "settings.json"
             path.write_text(json.dumps({"profiles": {"test": {
-                "device": "c5", "mode": "tcp-server", "port": 8088, "capture": "raw.bin"
+                "device": "c5", "mode": "tcp-server", "port": 8088, "com": "loop://",
+                "usb_port": "COM88", "usb_log": "usb.log"
             }}}), encoding="utf-8")
             args = tcp2com.parse_args(["--config", str(path), "--profile", "test", "--port", "8099"])
             self.assertEqual(args.port, 8099)
-            self.assertEqual(args.capture, str(Path(directory) / "raw.bin"))
+            self.assertEqual(args.usb_log, str(Path(directory) / "usb.log"))
             self.assertTrue(args.no_reset_ui)
 
     def test_shipped_profiles_are_valid(self):
@@ -87,6 +88,36 @@ class SettingsTests(unittest.TestCase):
             with self.subTest(profile=name):
                 args = tcp2com.parse_args(["--config", str(path), "--profile", name])
                 self.assertEqual(args.no_reset_ui, args.device in ("c5", "s3"))
+
+    def test_bridge_requires_com_and_removed_capture_cli_never_opens_files_or_ports(self):
+        self.parse_error(["--host", "localhost"])
+        self.parse_error(["--host", "localhost", "--com", "   "])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "old-recording.bin"
+            path.write_bytes(b"original recording")
+            with mock.patch("tcp2com.serial.serial_for_url") as opener:
+                self.parse_error(["--host", "localhost", "--com", "loop://", "--capture", str(path)])
+                opener.assert_not_called()
+            self.assertEqual(path.read_bytes(), b"original recording")
+        self.assertNotIn("--capture", tcp2com.build_parser().format_help())
+
+    def test_old_capture_profile_is_rejected_without_blocking_other_profiles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text(json.dumps({"profiles": {
+                "old": {"device": "s3", "mode": "tcp-client", "host": "localhost", "capture": "old.bin"},
+                "valid": {"device": "s3", "mode": "tcp-client", "host": "localhost", "com": "loop://"}
+            }}), encoding="utf-8")
+            error = io.StringIO()
+            with contextlib.redirect_stderr(error), self.assertRaises(SystemExit):
+                tcp2com.parse_args(["--config", str(path), "--profile", "old"])
+            self.assertIn("已移除", error.getvalue())
+            self.assertEqual(tcp2com.parse_args(["--config", str(path), "--profile", "valid"]).com, "loop://")
+            for name in ("c5-capture", "s3-capture"):
+                error = io.StringIO()
+                with contextlib.redirect_stderr(error), self.assertRaises(SystemExit):
+                    tcp2com.parse_args(["--config", str(path), "--profile", name])
+                self.assertIn("已移除", error.getvalue())
 
     def test_invalid_profiles_and_values_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -188,20 +219,6 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(receive(peer, 13), b"new-session\x00\xff")
         self.assertEqual(app.stats.snapshot()["com_to_tcp_drop"], 0)
 
-    def test_capture_flushes_short_connection_tail_and_preserves_existing_file(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "capture.bin"
-            app = self.app(extra=("--capture", str(path)))
-            payload = bytes(range(256)) * 200
-            with socket.create_connection(app.server.address, timeout=2) as peer:
-                peer.sendall(payload)
-            wait_for(lambda: path.stat().st_size == len(payload))
-            self.assertEqual(path.read_bytes(), payload)
-            app.stop()
-            another = tcp2com.App(app.args, QuietUI())
-            self.assertFalse(another.start())
-            self.assertEqual(path.read_bytes(), payload)
-
     def test_bind_failure_releases_com_and_exits(self):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
@@ -268,16 +285,6 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(bytes(written), payload)
         finally:
             app.stop()
-
-    def test_capture_disk_error_counts_only_unwritten_remainder(self):
-        args = tcp2com.parse_args(["--device", "c5", "--host", "localhost", "--capture", "unused.bin"])
-        app = tcp2com.App(args, QuietUI())
-        app.capture = mock.Mock()
-        app.capture.write.side_effect = [3, OSError("disk full")]
-        with self.assertRaises(tcp2com.CaptureWriteError):
-            app._capture_write(b"abcdefgh")
-        self.assertEqual(app.stats.snapshot()["tcp_to_com_bytes"], 3)
-        self.assertEqual(app.stats.snapshot()["tcp_to_com_drop"], 5)
 
     def test_udp_com_roundtrip_and_rogue_peer_filter(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as peer, \

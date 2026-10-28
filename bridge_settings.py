@@ -29,6 +29,8 @@ def load_defaults(parser, argv):
         if not isinstance(document, dict) or set(document) != {"profiles"}:
             raise ValueError("配置根对象只能包含 profiles")
         profiles = document["profiles"]
+        if isinstance(profiles, dict) and selection.profile in ("c5-capture", "s3-capture") and selection.profile not in profiles:
+            raise ValueError("capture 配置已移除，请选择 COM 桥接配置")
         if not isinstance(profiles, dict) or not selection.profile or selection.profile not in profiles:
             raise ValueError("请用 --profile 选择存在的配置")
         settings = profiles[selection.profile]
@@ -37,6 +39,8 @@ def load_defaults(parser, argv):
         actions = {action.dest: action for action in parser._actions
                    if action.dest not in {"help", "config", "profile", "list_coms", "open_config"}}
         for key, value in settings.items():
+            if key == "capture":
+                raise ValueError("capture 文件接收功能已移除，请删除该字段并配置 com")
             if key not in actions:
                 raise ValueError(f"未知配置项：{key}")
             action = actions[key]
@@ -51,9 +55,8 @@ def load_defaults(parser, argv):
             if not valid or (action.choices and value not in action.choices):
                 raise ValueError(f"配置项类型或选项错误：{key}")
         settings = dict(settings)
-        for key in ("capture", "usb_log"):
-            if settings.get(key):
-                settings[key] = str((path.parent / settings[key]).resolve())
+        if settings.get("usb_log"):
+            settings["usb_log"] = str((path.parent / settings["usb_log"]).resolve())
         parser.set_defaults(**settings)
     except (OSError, ValueError) as exc:
         parser.error(f"无法读取配置：{exc}")

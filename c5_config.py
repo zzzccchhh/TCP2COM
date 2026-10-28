@@ -21,6 +21,9 @@ class SaveOutcomeUnknown(ConfigError):
 
 TOP_FIELDS = ("link_mode", "mode", "band", "baud", "tcp_port", "ap_channel",
               "ap_ssid", "ap_ip", "ap_gateway", "ap_netmask")
+NETWORK_FIELDS = ("net_role", "auto_reconnect", "remote_ip", "remote_port", "local_port",
+                  "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb")
+CONFIG_APIS = {"c5": "c5-wbr-1", "s3": "bridge-1"}
 STATION_FIELDS = ("ssid", "static_ip", "ip", "gateway", "netmask", "dns")
 
 
@@ -34,6 +37,26 @@ def public_config(document, device="c5"):
             result[name] = {key: copy.deepcopy(document[name][key]) for key in STATION_FIELDS}
     except (KeyError, TypeError) as exc:
         raise ConfigError("配置缺少必要字段，请检查固件版本") from exc
+    for key in NETWORK_FIELDS:
+        if key in document:
+            result[key] = copy.deepcopy(document[key])
+    api = document.get("config_api")
+    if api is not None:
+        if api != CONFIG_APIS.get(device):
+            raise ConfigError("设备配置接口与所选型号不匹配或版本不支持，请重新选择并读取")
+        if "revision" not in document or any(key not in document for key in NETWORK_FIELDS):
+            raise ConfigError("新固件配置缺少修订号或网络字段，请重新读取并检查固件版本")
+        result["config_api"] = api
+    for key in ("revision", "saved_revision"):
+        if key in document:
+            if type(document[key]) is not int or not 0 <= document[key] <= 0xffffffff:
+                raise ConfigError(f"{key} 必须为有效的配置修订号，请重新读取")
+            result[key] = document[key]
+    for key in ("unsaved", "migration_requires_setup"):
+        if key in document:
+            if type(document[key]) is not bool:
+                raise ConfigError("设备配置状态格式不正确，请重新读取")
+            result[key] = document[key]
     validate_config(result, device)
     return result
 
@@ -76,10 +99,23 @@ def _network(ip, gateway, netmask, ap=False):
 
 
 def validate_config(config, device="c5"):
-    for key, low, high in (("link_mode", 0, 1), ("mode", 0, 2), ("band", 0, 2),
+    for key, low, high in (("link_mode", 0, 2), ("mode", 0, 2), ("band", 0, 2),
                            ("baud", 9600, 5000000), ("tcp_port", 1024, 65535), ("ap_channel", 1, 165)):
         if type(config.get(key)) is not int or not low <= config[key] <= high:
             raise ConfigError(f"{key} 必须为 {low}～{high} 的整数")
+    for key, low, high in (("net_role",0,2),("remote_port",1,65535),("local_port",0,65535),
+                           ("reconnect_ms",100,60000),("connect_timeout_ms",100,60000),
+                           ("up_kb",64,6144),("down_kb",64,2048)):
+        if key in config and (type(config[key]) is not int or not low <= config[key] <= high):
+            raise ConfigError(f"{key} 必须为 {low}～{high} 的整数")
+    if "auto_reconnect" in config and type(config["auto_reconnect"]) is not bool:
+        raise ConfigError("auto_reconnect 必须为布尔值")
+    if "remote_ip" in config:
+        ip = _address(config["remote_ip"])
+        if ip >> 24 in (0,127) or ip >> 24 >= 224:
+            raise ConfigError("目标 IP 无效")
+    if config.get("up_kb",64) + config.get("down_kb",64) > 6144:
+        raise ConfigError("缓冲总容量不得超过 6144 KiB")
     _text(config.get("ap_ssid"), "AP SSID", 32, 1)
     if config["band"] not in capabilities(device).bands:
         raise ConfigError(f"{capabilities(device).label} 仅支持 2.4 GHz，频段必须为 0")
@@ -124,7 +160,8 @@ def changed_config(baseline, edited, passwords=None, clear_passwords=(), device=
         else:
             candidate[name]["password"] = value
     validate_config(candidate, device)
-    patch = {key: candidate[key] for key in TOP_FIELDS if candidate[key] != base[key]}
+    patch = {key: candidate[key] for key in TOP_FIELDS + NETWORK_FIELDS
+             if key in candidate and candidate[key] != base.get(key)}
     if "ap_password" in candidate:
         patch["ap_password"] = candidate["ap_password"]
     for name in ("pc", "shared"):
@@ -174,6 +211,7 @@ class C5Client:
         self.timeout = timeout
         self.identity = (self.scheme, self.host.casefold(), self.port)
         self.http_session = None
+        self.session_header = "X-C5-Session"
 
     def bind_session(self, token):
         if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{16}-[1-9][0-9]{0,9}", token):
@@ -193,13 +231,15 @@ class C5Client:
             sent = method == "POST"
             headers = {"Content-Type": "application/json", "Connection": "close"}
             if method == "POST":
-                headers["X-C5-Session"] = self.http_session
+                if self.baseline and self.baseline.get("config_api") == "bridge-1":
+                    self.session_header = "X-Bridge-Session"
+                headers[self.session_header] = self.http_session
             connection.request(method, "/api/config", body=body, headers=headers)
             response = connection.getresponse()
             if response.status == 403:
                 raise ConfigError(f"403：{self.capabilities.setup_hint}")
             if response.status == 503:
-                raise ConfigError("503：配网会话已失效或设备正在重启，请重新进入配网并读取")
+                raise ConfigError("503：配网会话已失效、配置修订号已变化或设备正在重启，请重新进入配网并读取")
             if response.status != 200:
                 # Do not echo device bodies: they could contain submitted credentials.
                 if method == "POST" and response.status >= 500:
@@ -226,6 +266,7 @@ class C5Client:
         self.http_session = None
         self.identity = self.identity[:3]
         document = self._request("GET")
+        self.session_header = "X-Bridge-Session" if document.get("config_api") == "bridge-1" else "X-C5-Session"
         result = public_config(document, self.device)
         self.bind_session(document.get("http_session"))
         result["config_source"] = str(document.get("config_source", "unknown"))
@@ -236,6 +277,9 @@ class C5Client:
         if self.http_session is None:
             raise ConfigError("请先从当前设备读取配置，再保存")
         validate_patch(patch, self.device, self.baseline)
+        patch = copy.deepcopy(patch)
+        if self.baseline and "revision" in self.baseline:
+            patch["revision"] = self.baseline["revision"]
         result = self._request("POST", patch)
         if result.get("saved") is not True or result.get("restart") is not True:
             raise SaveOutcomeUnknown("保存结果待确认：未收到 saved/restart 确认，请重新进入配置热点读取")
