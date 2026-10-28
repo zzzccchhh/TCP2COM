@@ -335,11 +335,15 @@ class Connection:
 
 class Stats:
     KEYS = ("tcp_rx_bytes", "tcp_to_com_bytes", "com_to_tcp_bytes", "tcp_to_com_drop", "com_to_tcp_drop",
-            "udp_rx_packets", "udp_tx_packets", "udp_rejected", "udp_empty")
+            "udp_rx_packets", "udp_tx_packets", "udp_rejected", "udp_empty", "enqueue_wait_us",
+            "serial_write_calls", "serial_write_us", "serial_write_max_us", "serial_write_short",
+            "serial_write_timeouts")
 
     def __init__(self):
         self.lock = threading.Lock()
         self.values = {key: 0 for key in self.KEYS}
+        self.serial_write_started_ns = 0
+        self.serial_write_pending_bytes = 0
 
     def add(self, key: str, amount: int) -> None:
         if amount <= 0:
@@ -349,7 +353,49 @@ class Stats:
 
     def snapshot(self) -> dict:
         with self.lock:
-            return dict(self.values)
+            result = dict(self.values)
+            result["serial_write_pending_bytes"] = self.serial_write_pending_bytes
+            result["serial_write_pending_us"] = (
+                (time.monotonic_ns() - self.serial_write_started_ns) // 1000
+                if self.serial_write_started_ns else 0)
+            return result
+
+    def serial_write_begin(self, requested: int) -> None:
+        with self.lock:
+            self.serial_write_started_ns = time.monotonic_ns()
+            self.serial_write_pending_bytes = requested
+
+    def serial_write(self, duration_us: int, requested: int, written: Optional[int]) -> None:
+        with self.lock:
+            self.serial_write_started_ns = 0
+            self.serial_write_pending_bytes = 0
+            self.values["serial_write_calls"] += 1
+            self.values["serial_write_us"] += duration_us
+            self.values["serial_write_max_us"] = max(self.values["serial_write_max_us"], duration_us)
+            if written is not None and written < requested:
+                self.values["serial_write_short"] += 1
+
+
+class ByteQueue(queue.Queue):
+    """Track bytes under Queue's existing lock; in-flight blocks are excluded."""
+    def _init(self, maxsize):
+        super()._init(maxsize)
+        self.queued_bytes = 0
+        self.peak_bytes = 0
+
+    def _put(self, item):
+        super()._put(item)
+        self.queued_bytes += len(item[1])
+        self.peak_bytes = max(self.peak_bytes, self.queued_bytes)
+
+    def _get(self):
+        item = super()._get()
+        self.queued_bytes -= len(item[1])
+        return item
+
+    def byte_snapshot(self):
+        with self.mutex:
+            return self.queued_bytes, self.peak_bytes
 
 
 class App:
@@ -366,8 +412,8 @@ class App:
         self.stats = Stats()
         self.exit_code = 0
         # 队列项格式：(connection_generation, bytes)
-        self.q_tcp_to_com = queue.Queue(maxsize=QUEUE_BLOCKS)
-        self.q_com_to_tcp = queue.Queue(maxsize=QUEUE_BLOCKS)
+        self.q_tcp_to_com = ByteQueue(maxsize=QUEUE_BLOCKS)
+        self.q_com_to_tcp = ByteQueue(maxsize=QUEUE_BLOCKS)
         self.threads = []
         self.stopped = False
         self.pressure_lock = threading.Lock()
@@ -473,6 +519,9 @@ class App:
                     age = "尚未收包" if self.last_udp_rx is None else f"距收包 {now - self.last_udp_rx:.1f}s"
                     state = f"已绑定，{age}"
                 q_depth = self.q_tcp_to_com.qsize()
+                q_bytes, q_peak = self.q_tcp_to_com.byte_snapshot()
+                write_calls = current["serial_write_calls"] - base["serial_write_calls"]
+                write_us = current["serial_write_us"] - base["serial_write_us"]
                 label = "UDP" if self.args.mode == "udp" else "TCP"
                 rate = (
                     f"{label}:{state} | 网络收 {human_bytes(tcp_rx_rate)}/s | "
@@ -480,7 +529,9 @@ class App:
                     f"队列↓↑ {q_depth}/{self.q_com_to_tcp.qsize()}（各{QUEUE_BLOCKS}块） | "
                     f"本地→网络 {human_bytes(com_to_tcp_rate)}/s | "
                     f"累计丢弃 {human_bytes(current['tcp_to_com_drop'])}/"
-                    f"{human_bytes(current['com_to_tcp_drop'])}"
+                    f"{human_bytes(current['com_to_tcp_drop'])} | "
+                    f"待写 {human_bytes(q_bytes)} 峰值 {human_bytes(q_peak)} | "
+                    f"COM写均值 {write_us // write_calls if write_calls else 0}us"
                 )
                 if self.args.mode == "udp":
                     rate += (f" | UDP包收/发 {current['udp_rx_packets']}/{current['udp_tx_packets']}"
@@ -550,8 +601,13 @@ class App:
                         remaining,
                     )
                     return False
+                enqueue_start = time.monotonic_ns()
                 try:
-                    q.put((generation, block), timeout=0.05)
+                    try:
+                        q.put((generation, block), timeout=0.05)
+                    finally:
+                        if name == "tcp_to_com":
+                            self.stats.add("enqueue_wait_us", (time.monotonic_ns() - enqueue_start) // 1000)
                     if q.qsize() < max(1, QUEUE_BLOCKS // 2):
                         self._set_queue_pressure(name, False)
                     break
@@ -760,7 +816,17 @@ class App:
                     # Shorter writes produce timely progress updates and avoid
                     # counting a whole 64-KB batch only after a long blocking write.
                     chunk = view[:SERIAL_WRITE_CHUNK_BYTES]
-                    n = self.ser.write(chunk)
+                    self.stats.serial_write_begin(len(chunk))
+                    started_ns = time.monotonic_ns()
+                    n = None
+                    try:
+                        n = self.ser.write(chunk)
+                    except serial.SerialTimeoutException:
+                        self.stats.add("serial_write_timeouts", 1)
+                        raise
+                    finally:
+                        duration_us = (time.monotonic_ns() - started_ns) // 1000
+                        self.stats.serial_write(duration_us, len(chunk), n)
                     if not n:
                         self.close_event.wait(0.001)
                         continue

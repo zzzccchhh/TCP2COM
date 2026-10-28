@@ -141,6 +141,70 @@ class SettingsTests(unittest.TestCase):
 
 
 class BridgeTests(unittest.TestCase):
+    def test_byte_queue_tracks_actual_bytes_and_peak(self):
+        q = tcp2com.ByteQueue(maxsize=3)
+        q.put((1, b"abc"))
+        q.put((1, b"0123456"))
+        self.assertEqual(q.byte_snapshot(), (10, 10))
+        self.assertEqual(q.get_nowait()[1], b"abc")
+        self.assertEqual(q.byte_snapshot(), (7, 10))
+        self.assertEqual(tcp2com.App._drain_queue(q), 7)
+        self.assertEqual(q.byte_snapshot(), (0, 10))
+
+    def test_serial_timeout_is_timed_without_replay(self):
+        args = tcp2com.parse_args(["--host", "localhost", "--com", "loop://"])
+        app = tcp2com.App(args, QuietUI())
+        first, second = socket.socketpair()
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        generation = app.conn.set(first)
+        app.ser = mock.Mock()
+        app.ser.write.side_effect = tcp2com.serial.SerialTimeoutException("timeout")
+        app.q_tcp_to_com.put((generation, b"payload"))
+        worker = threading.Thread(target=app._serial_write_worker)
+        app.threads.append(worker)
+        worker.start()
+        try:
+            wait_for(lambda: app.stats.snapshot()["tcp_to_com_drop"] == 7)
+            stats = app.stats.snapshot()
+            self.assertEqual(stats["serial_write_timeouts"], 1)
+            self.assertEqual(stats["serial_write_calls"], 1)
+            self.assertEqual(stats["serial_write_short"], 0)
+            app.ser.write.assert_called_once()
+        finally:
+            app.stop()
+
+    def test_inflight_serial_write_visible_until_completion(self):
+        args = tcp2com.parse_args(["--host", "localhost", "--com", "loop://"])
+        app = tcp2com.App(args, QuietUI())
+        first, second = socket.socketpair()
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        generation = app.conn.set(first)
+        entered, release = threading.Event(), threading.Event()
+
+        def slow_write(data):
+            entered.set()
+            self.assertTrue(release.wait(2))
+            return len(data)
+
+        app.ser = mock.Mock()
+        app.ser.write.side_effect = slow_write
+        app.q_tcp_to_com.put((generation, b"abcd"))
+        worker = threading.Thread(target=app._serial_write_worker)
+        app.threads.append(worker)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(2))
+            self.assertEqual(app.q_tcp_to_com.byte_snapshot()[0], 0)
+            self.assertEqual(app.stats.snapshot()["serial_write_pending_bytes"], 4)
+            release.set()
+            wait_for(lambda: app.stats.snapshot()["tcp_to_com_bytes"] == 4)
+            self.assertEqual(app.stats.snapshot()["serial_write_pending_bytes"], 0)
+        finally:
+            release.set()
+            app.stop()
+
     def test_new_peer_waits_for_old_read_before_forwarding_first_packet(self):
         args = tcp2com.parse_args(["--device", "c5", "--mode", "tcp-server", "--listen", "127.0.0.1",
                                   "--port", str(free_port()), "--com", "loop://", "--timeout", ".01"])
@@ -260,6 +324,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(results, [False])
         self.assertEqual(bounded.qsize(), 1)
         self.assertEqual(app.stats.snapshot()["tcp_to_com_drop"], 26)
+        self.assertGreaterEqual(app.stats.snapshot()["enqueue_wait_us"], 40000)
 
     def test_partial_serial_writes_preserve_binary_order(self):
         args = tcp2com.parse_args(["--host", "localhost", "--com", "loop://"])
@@ -283,6 +348,10 @@ class BridgeTests(unittest.TestCase):
         try:
             wait_for(lambda: app.stats.snapshot()["tcp_to_com_bytes"] == len(payload))
             self.assertEqual(bytes(written), payload)
+            stats = app.stats.snapshot()
+            self.assertGreater(stats["serial_write_calls"], 1)
+            self.assertGreater(stats["serial_write_short"], 0)
+            self.assertEqual(stats["serial_write_timeouts"], 0)
         finally:
             app.stop()
 

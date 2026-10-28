@@ -133,6 +133,7 @@ class BridgeGUI:
         self.runtime = tk.StringVar(root, value="")
         self.rates = tk.StringVar(root, value="网络接收 / 本地写入 / 网络发送：0 B/s")
         self.totals = tk.StringVar(root, value="队列 0 / 0 · 累计丢弃 0 / 0")
+        self.bridge_detail = tk.StringVar(root, value="")
         self.c5_status = tk.StringVar(root, value="尚未读取设备；可选择 USB 单线连接，或 Wi-Fi 配置热点")
         self.c5_dirty = tk.StringVar(root, value="请先读取")
         self.usb_status = tk.StringVar(root, value="USB 诊断未启动")
@@ -263,7 +264,7 @@ class BridgeGUI:
         self._build_logs()
         footer = ttk.Frame(outer, padding=(0, 8, 0, 0))
         footer.pack(fill="x")
-        for variable in (self.runtime, self.address, self.rates, self.totals):
+        for variable in (self.runtime, self.address, self.rates, self.totals, self.bridge_detail):
             ttk.Label(footer, textvariable=variable, wraplength=1050).pack(anchor="w")
         ttk.Label(footer, textvariable=self.state_status, wraplength=1050).pack(anchor="w")
         for form in (self.network, self.local, self.advanced, self.usb_form):
@@ -966,10 +967,18 @@ class BridgeGUI:
                                  f"{app.args.com} / {app.args.baud} / {app.args.bytesize}{app.args.parity}{app.args.stopbits}")
                 self.rates.set(self.controller.ui.rate.strip())
                 stats = app.stats.snapshot()
+                queued, peak = app.q_tcp_to_com.byte_snapshot()
+                calls = stats["serial_write_calls"]
+                avg_us = stats["serial_write_us"] // calls if calls else 0
                 self.totals.set(f"队列 {app.q_tcp_to_com.qsize()} / {app.q_com_to_tcp.qsize()} · "
                                 f"累计丢弃 {stats['tcp_to_com_drop']} / {stats['com_to_tcp_drop']} B · "
                                 f"UDP 收/发/拒绝 {stats['udp_rx_packets']}/{stats['udp_tx_packets']}/{stats['udp_rejected']} · "
                                 f"日志队列丢弃 {self.controller.ui.dropped} 条")
+                self.bridge_detail.set(f"网络→COM待写 {queued} B（峰值 {peak} B，不含正在写入） · "
+                                       f"COM写均值/最大 {avg_us}/{stats['serial_write_max_us']} us · "
+                                       f"正在写 {stats['serial_write_pending_bytes']} B/{stats['serial_write_pending_us']} us · "
+                                       f"短写/超时 {stats['serial_write_short']}/{stats['serial_write_timeouts']} · "
+                                       f"入队耗时累计 {stats['enqueue_wait_us']} us")
                 sock = app.conn.snapshot()[0]
                 try:
                     self.address.set(f"本地 {sock.getsockname()} · 对端 {sock.getpeername()}" if sock and not app.udp else
@@ -981,6 +990,7 @@ class BridgeGUI:
                 self.runtime.set("")
                 self.address.set("业务桥接已停止")
                 self.rates.set("网络接收 / 本地写入 / 网络发送：0 B/s")
+                self.bridge_detail.set("")
             self._usb_status(usb, now)
         self.poll_job = self.root.after(100, self.poll)
 
