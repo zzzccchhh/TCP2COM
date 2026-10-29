@@ -8,6 +8,7 @@ import gc
 import json
 from pathlib import Path
 import queue
+import re
 import threading
 import time
 import tkinter as tk
@@ -28,6 +29,7 @@ BASE = Path(__file__).resolve().parent
 DEVICE = {caps.label: key for key, caps in DEVICES.items()}
 MODES = {"TCP 客户端（电脑连接设备）": "tcp-client", "TCP 服务端（电脑等待设备）": "tcp-server",
          "UDP（固定对端）": "udp"}
+ESP_LEVEL = re.compile(r"^\s*([EWIDV])\s+\(\s*\d+\s*\)")
 
 
 class Form:
@@ -108,6 +110,7 @@ class BridgeGUI:
         self.http_events = queue.Queue(4)
         self.http_thread = None
         self.http_busy = False
+        self.config_job_transport = None
         self.baseline = None
         self.read_identity = None
         self.read_device = None
@@ -137,7 +140,9 @@ class BridgeGUI:
         self.c5_status = tk.StringVar(root, value="尚未读取设备；可选择 USB 单线连接，或 Wi-Fi 配置热点")
         self.c5_dirty = tk.StringVar(root, value="请先读取")
         self.usb_status = tk.StringVar(root, value="USB 诊断未启动")
+        self.usb_master_status = tk.StringVar(root, value="USB：已关闭")
         self.filter_text = tk.StringVar(root)
+        self.log_source = tk.StringVar(root, value="全部")
         self.autoscroll = tk.BooleanVar(root, value=True)
         self.state_status = tk.StringVar(root, value="界面设置会自动记住，连接需手动启动")
         self._build()
@@ -206,6 +211,11 @@ class BridgeGUI:
         for button in (self.stop_button, self.restart_button, self.reset_button):
             button.configure(state="disabled")
         ttk.Label(actions, textvariable=self.applied).pack(side="right")
+        usb_bar = ttk.Frame(outer)
+        usb_bar.pack(fill="x", pady=(0, 6))
+        self.usb_master_button = ttk.Button(usb_bar, text="连接 USB", command=self.toggle_usb)
+        self.usb_master_button.pack(side="left")
+        ttk.Label(usb_bar, textvariable=self.usb_master_status).pack(side="left", padx=8)
         self.tabs = ttk.Notebook(outer)
         self.tabs.pack(fill="both", expand=True)
         self.network = self._tab("网络连接")
@@ -243,7 +253,7 @@ class BridgeGUI:
         self.advanced.add("verbose", "调试日志", False, boolean=True)
         self._build_c5()
         self.usb_form = self._tab("USB 诊断")
-        self.usb_form.note("C5/S3 原生 USB Serial/JTAG 日志及配置共用此连接，独立于业务 COM。可在未启动桥接时单独开启。")
+        self.usb_form.note("USB 日志及配置需要手动连接；断开后可供 ESP-IDF monitor 使用。业务 COM 启动桥接时会被占用，请选择不同端口。")
         self.usb_form.add("usb_port", "USB COM（日志 / 配置，留空关闭）", "", serial_port=True)
         self.c5_usb_combo.configure(textvariable=self.usb_form.variables["usb_port"])
         ttk.Button(self.usb_form.frame, text="刷新串口", command=self.refresh_ports).grid(row=1, column=2, padx=6)
@@ -251,8 +261,10 @@ class BridgeGUI:
             widget.configure(postcommand=self.refresh_ports)
         self.usb_form.add("usb_baud", "USB 波特率", "115200")
         self.usb_form.add("usb_log", "USB 追加文本日志（可选）", "", browse=lambda: self.browse_field(self.usb_form, "usb_log"))
-        ttk.Button(self.usb_form.frame, text="应用 USB 参数 / 单独启停", command=self.apply_usb).grid(
-            row=self.usb_form.row, column=0, columnspan=2, sticky="w", pady=8)
+        ttk.Button(self.usb_form.frame, text="连接 / 应用 USB", command=self.apply_usb).grid(
+            row=self.usb_form.row, column=0, sticky="w", pady=8)
+        ttk.Button(self.usb_form.frame, text="断开 USB", command=self.disconnect_usb).grid(
+            row=self.usb_form.row, column=1, sticky="w", pady=8)
         self.usb_form.row += 1
         ttk.Label(self.usb_form.frame, textvariable=self.usb_status, wraplength=800).grid(
             row=self.usb_form.row, column=0, columnspan=3, sticky="w")
@@ -372,15 +384,22 @@ class BridgeGUI:
         toolbar.pack(fill="x", pady=(0, 6))
         ttk.Label(toolbar, text="筛选").pack(side="left")
         ttk.Entry(toolbar, textvariable=self.filter_text, width=24).pack(side="left", padx=6)
+        ttk.Label(toolbar, text="来源").pack(side="left")
+        ttk.Combobox(toolbar, textvariable=self.log_source, values=("全部", "上位机", "USB / ESP"),
+                     state="readonly", width=10).pack(side="left", padx=6)
         ttk.Checkbutton(toolbar, text="自动滚动（取消以暂停）", variable=self.autoscroll).pack(side="left")
         ttk.Button(toolbar, text="清空", command=self.clear_logs).pack(side="right")
         ttk.Button(toolbar, text="导出日志…", command=self.export_logs).pack(side="right", padx=6)
         self.log_text = tk.Text(frame, wrap="word", state="disabled", font=("Consolas", 10))
+        for level, color in {"E": "#c62828", "W": "#a65c00", "I": "#18733b",
+                             "D": "#315a9b", "V": "#666666"}.items():
+            self.log_text.tag_configure(level, foreground=color)
         scrollbar = ttk.Scrollbar(frame, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         self.log_text.pack(fill="both", expand=True)
         self.filter_text.trace_add("write", lambda *_: setattr(self, "log_dirty", True))
+        self.log_source.trace_add("write", lambda *_: setattr(self, "log_dirty", True))
 
     @contextmanager
     def _pause_device(self):
@@ -664,10 +683,11 @@ class BridgeGUI:
             self.error("配置请求正在进行，请等待完成后再启动或重启桥接")
             return
         try:
-            args = settings_to_args(self.settings())
+            values = self.settings()
+            values["usb_port"] = values["usb_log"] = None
+            args = settings_to_args(values)
             self._reset_shutdown()
-            if self.controller.submit(command, args):
-                self._invalidate_config()
+            self.controller.submit(command, args)
         except ValueError as exc:
             self.error(exc)
 
@@ -698,6 +718,21 @@ class BridgeGUI:
             return True
         except ValueError as exc:
             self.error(exc)
+
+    def disconnect_usb(self):
+        if self.controller.submit("usb"):
+            if (self.read_identity and self.read_identity[0] == "usb") or self.config_job_transport == "usb":
+                self._invalidate_config()
+            if self.config_job_transport == "usb":
+                self.c5_status.set("USB 正在关闭；若保存已发送，请重新连接并读取核对保存结果")
+        else:
+            self.error("连接操作正在进行，请稍后再试")
+
+    def toggle_usb(self):
+        if self.controller.snapshot()[1]:
+            self.disconnect_usb()
+        else:
+            self.connect_c5_usb()
 
     def connect_c5_usb(self):
         if not self.usb_form.get("usb_port").strip():
@@ -746,6 +781,7 @@ class BridgeGUI:
         if action == "read":
             self.baseline = self.read_identity = None
         self.http_busy = True
+        self.config_job_transport = client.identity[0]
         self._c5_enable()
         self.c5_status.set("正在读取…" if action == "read" else "正在保存到 NVS，请等待响应…")
         context = (self.context_epoch, self.network.get("device"))
@@ -859,9 +895,13 @@ class BridgeGUI:
         except queue.Empty:
             return
         self.http_busy = False
+        self.config_job_transport = None
         action, identity, document, error = event[:4]
         if len(event) == 5 and event[4] != (self.context_epoch, self.network.get("device")):
-            self.c5_status.set("配置连接已改变，已丢弃旧请求结果；请重新读取")
+            if action == "save" and identity[0] == "usb":
+                self.c5_status.set("USB 保存结果待确认；请重新连接并读取核对，勿直接重发")
+            else:
+                self.c5_status.set("配置连接已改变，已丢弃旧请求结果；请重新读取")
             self._c5_enable()
             return
         if action == "read" and not error and identity[0] == "usb":
@@ -905,24 +945,32 @@ class BridgeGUI:
         path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".log")
         if path:
             try:
-                Path(path).write_text("\n".join(self.logs) + "\n", encoding="utf-8")
+                Path(path).write_text("\n".join(line for _, line, _ in self.logs) + "\n", encoding="utf-8")
             except OSError as exc:
                 self.error(exc)
 
     def _logs(self):
         for _ in range(200):
             try:
-                timestamp, text = self.controller.ui.events.get_nowait()
+                timestamp, source, text = self.controller.ui.events.get_nowait()
             except queue.Empty:
                 break
-            self.logs.append(time.strftime("%H:%M:%S", time.localtime(timestamp)) + " " + text)
+            match = ESP_LEVEL.match(text) if source == "usb" else None
+            label = "USB / ESP" if source == "usb" else "上位机"
+            line = time.strftime("%H:%M:%S", time.localtime(timestamp)) + f" [{label}] " + text
+            self.logs.append((source, line, match.group(1) if match else ""))
             self.log_dirty = True
         if self.log_dirty:
             position = self.log_text.yview()[0]
             search = self.filter_text.get().casefold()
             self.log_text.configure(state="normal")
             self.log_text.delete("1.0", "end")
-            self.log_text.insert("end", "\n".join(line for line in self.logs if search in line.casefold()))
+            selected = self.log_source.get()
+            for source, line, level in self.logs:
+                if (selected == "上位机" and source != "host") or (selected == "USB / ESP" and source != "usb"):
+                    continue
+                if search in line.casefold():
+                    self.log_text.insert("end", line + "\n", level)
             self.log_text.configure(state="disabled")
             self.log_text.see("end") if self.autoscroll.get() else self.log_text.yview_moveto(position)
             self.log_dirty = False
@@ -938,6 +986,16 @@ class BridgeGUI:
         self._http_results()
         self._logs()
         app, usb, running, state, busy = self.controller.snapshot()
+        self.usb_master_button.configure(text="关闭 USB" if usb else "连接 USB",
+                                         state="disabled" if busy or self.closing else "normal")
+        if busy:
+            self.usb_master_status.set("USB：正在处理连接操作…" if usb else "USB：正在处理…")
+        elif usb:
+            snapshot = usb.status()
+            state_text = "正在关闭 / 关闭失败" if usb.stop_event.is_set() else ("已连接" if snapshot["connected"] else "连接中 / 重试中")
+            self.usb_master_status.set(f"USB：{state_text} · {usb.port}")
+        else:
+            self.usb_master_status.set("USB：已关闭")
         if self.reset_panel and (not app or self.reset_panel.app is not app):
             self._reset_shutdown()
         self.status.set(state)
@@ -946,10 +1004,12 @@ class BridgeGUI:
         self.restart_button.configure(state="normal" if not busy and not self.http_busy and app else "disabled")
         self.reset_button.configure(state="normal" if app and not busy and not app.args.no_reset_ui else "disabled")
         try:
-            edited = vars(settings_to_args(self.settings()))
+            values = self.settings()
+            values["usb_port"] = values["usb_log"] = None
+            edited = vars(settings_to_args(values))
             if running:
                 # Display refresh and the HTTP endpoint are applied immediately in the UI.
-                for key in ("stats_interval", "config_url", "config_transport"):
+                for key in ("stats_interval", "config_url", "config_transport", "usb_port", "usb_baud", "usb_log"):
                     running[key] = edited[key]
             self.applied.set("参数已应用" if running == edited else "参数未应用" if app else "未启动")
         except ValueError:

@@ -98,12 +98,18 @@ class EventUI:
         self.rate = ""
         self.warnings = {}
 
-    def message(self, text):
+    def message(self, text, source="host"):
         try:
-            self.events.put_nowait((time.time(), str(text)))
+            self.events.put_nowait((time.time(), source, str(text)))
         except queue.Full:
             with self.lock:
                 self.dropped += 1
+
+    def usb_message(self, text):
+        if text.startswith("USB | "):
+            self.message(text[6:], source="usb")
+        else:
+            self.message(text)
 
     def state(self, state, text):
         with self.lock:
@@ -165,11 +171,14 @@ class BridgeController:
 
     def _usb(self, args):
         with self.lock:
-            previous, self.usb = self.usb, None
+            previous = self.usb
         if previous:
             previous.close()
+            with self.lock:
+                if self.usb is previous:
+                    self.usb = None
         if args and capabilities(args.device).usb and args.usb_port and not self.closing:
-            monitor = self.usb_factory(args.usb_port, args.usb_baud, self.ui.message, args.usb_log, device=args.device)
+            monitor = self.usb_factory(args.usb_port, args.usb_baud, self.ui.usb_message, args.usb_log, device=args.device)
             monitor.start()
             with self.lock:
                 self.usb = monitor
@@ -186,11 +195,13 @@ class BridgeController:
                         self.state = "已停止（连接结束或错误，见日志）"
                 continue
             try:
+                if command in ("start", "restart") and self.usb and args.com.casefold() == self.usb.port.casefold():
+                    self.ui.message("业务 COM 正由 USB 诊断占用；请先断开 USB，或选择其他业务 COM")
+                    continue
                 if command in ("start", "restart", "stop"):
                     self._stop_app()
                 if command in ("start", "restart") and not self.closing:
                     self.ui.rate = ""
-                    self._usb(None)
                     # USB belongs to its own lifecycle, independent of payload forwarding.
                     payload = copy.deepcopy(args)
                     payload.usb_port = payload.usb_log = None
@@ -203,20 +214,20 @@ class BridgeController:
                         stats = threading.Thread(target=app.run, name="gui-rates", daemon=True)
                         app.threads.append(stats)
                         stats.start()
-                        self._usb(args)
                     else:
                         app.stop()
                 elif command == "usb":
                     self._usb(args)
                     with self.lock:
-                        if self.running_settings:
+                        if self.running_settings and args:
                             for key in ("usb_port", "usb_baud", "usb_log"):
                                 self.running_settings[key] = getattr(args, key)
                 elif command == "stop":
                     self._usb(None)
             except Exception as exc:
                 self.ui.message(f"操作失败：{exc}")
-                self._stop_app()
+                if command in ("start", "restart"):
+                    self._stop_app()
             finally:
                 with self.lock:
                     self.busy = False

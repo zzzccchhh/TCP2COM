@@ -137,6 +137,25 @@ class ControllerTests(unittest.TestCase):
         self.assertIs(self.controller.snapshot()[0], app)
         self.assertFalse(monitor.thread.is_alive())
 
+    def test_bridge_start_and_restart_do_not_start_or_replace_usb(self):
+        args = settings_to_args({"device": "c5", "mode": "tcp-server", "listen": "127.0.0.1",
+                                 "port": free_port(), "com": "loop://", "usb_port": "missing://"})
+        self.controller.submit("start", args)
+        wait_for(lambda: not self.controller.snapshot()[4])
+        self.assertIsNotNone(self.controller.snapshot()[0])
+        self.assertIsNone(self.controller.snapshot()[1])
+        self.controller.submit("usb", args)
+        wait_for(lambda: not self.controller.snapshot()[4])
+        monitor = self.controller.snapshot()[1]
+        self.controller.submit("restart", args)
+        wait_for(lambda: not self.controller.snapshot()[4])
+        self.assertIs(self.controller.snapshot()[1], monitor)
+        self.controller.submit("usb")
+        wait_for(lambda: not self.controller.snapshot()[4])
+        self.assertIsNone(self.controller.snapshot()[1])
+        self.assertFalse(monitor.thread.is_alive())
+        self.assertIsNotNone(self.controller.snapshot()[0])
+
     def test_failed_serial_open_stops_controller_start(self):
         args = settings_to_args({"device": "c5", "mode": "tcp-server", "port": free_port(), "com": "missing"})
         with mock.patch("tcp2com.serial.serial_for_url", side_effect=OSError("unavailable")):
@@ -579,6 +598,60 @@ class GUITests(unittest.TestCase):
         wait_for(lambda: self.gui.destroyed, self.root.update)
         self.assertFalse(original.thread.is_alive())
 
+    def test_master_disconnect_cancels_usb_read(self):
+        device = self.connect_usb_fixture()
+        device.drop = "hello"
+        self.gui.read_c5()
+        wait_for(lambda: device.requests, self.root.update)
+        monitor = self.gui.controller.snapshot()[1]
+        self.gui.toggle_usb()
+        wait_for(lambda: self.gui.controller.snapshot()[1] is None and not self.gui.http_busy, self.root.update)
+        self.assertTrue(device.closed)
+        self.assertFalse(monitor.thread.is_alive())
+        self.assertIsNone(self.gui.baseline)
+        self.assertEqual(self.gui.usb_form.get("usb_port"), "COM8")
+
+    def test_master_disconnect_during_save_reports_unknown(self):
+        device = self.connect_usb_fixture()
+        self.gui.read_c5()
+        wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        self.gui.c5_forms["common"].set("baud", "921600")
+        device.drop = "save"
+        with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True):
+            self.gui.save_c5()
+        wait_for(lambda: device.save_count == 1, self.root.update)
+        self.gui.toggle_usb()
+        wait_for(lambda: not self.gui.http_busy and self.gui.controller.snapshot()[1] is None, self.root.update)
+        self.assertIn("待确认", self.gui.c5_status.get())
+        self.assertEqual(device.save_count, 1)
+        self.assertIsNone(self.gui.baseline)
+        self.assertTrue(device.closed)
+
+    def test_master_disconnect_preserves_http_read(self):
+        self.connect_usb_fixture()
+        config = self.read_fixture()
+        self.gui.toggle_usb()
+        wait_for(lambda: self.gui.controller.snapshot()[1] is None, self.root.update)
+        self.assertIs(self.gui.baseline, config)
+
+    def test_master_disconnect_during_http_request(self):
+        self.connect_usb_fixture()
+        self.gui.config_transport.set("Wi-Fi HTTP")
+        entered, release = threading.Event(), threading.Event()
+        def delayed_read(_client):
+            entered.set()
+            release.wait(2)
+            return example_config()
+        with mock.patch("c5_config.C5Client.read", delayed_read):
+            self.gui.read_c5()
+            self.assertTrue(entered.wait(1))
+            self.gui.toggle_usb()
+            wait_for(lambda: self.gui.controller.snapshot()[1] is None, self.root.update)
+            self.assertTrue(self.gui.http_busy)
+            release.set()
+            wait_for(lambda: not self.gui.http_busy, self.root.update)
+        self.assertIsNotNone(self.gui.baseline)
+
     def test_usb_transport_profile_roundtrip_without_device_write(self):
         self.gui.config_transport.set("USB")
         self.gui.usb_form.set("usb_port", "COM8")
@@ -611,7 +684,7 @@ class GUITests(unittest.TestCase):
         self.root.deiconify()
         self.root.update()
         for i in range(3500):
-            self.gui.logs.append(f"{i} USB example")
+            self.gui.logs.append(("usb", f"{i} USB example", ""))
         self.gui.filter_text.set("3499")
         self.gui._logs()
         self.assertEqual(len(self.gui.logs), 3000)
@@ -619,6 +692,41 @@ class GUITests(unittest.TestCase):
         self.assertNotIn("3498", self.gui.log_text.get("1.0", "end"))
         self.assertLess(self.gui.tabs.winfo_y(), self.root.winfo_height())
         self.assertGreater(self.gui.tabs.winfo_height(), 150)
+
+    def test_log_sources_filter_and_level_tags(self):
+        self.gui.controller.ui.message("host message")
+        self.gui.controller.ui.usb_message("USB | E (123) wifi: failed")
+        self.gui.controller.ui.usb_message("USB | W (124) wifi: retry")
+        for level in "IDV":
+            self.gui.controller.ui.usb_message(f"USB | {level} (125) wifi: {level} message")
+        self.gui.controller.ui.usb_message("USB | boot text")
+        self.gui._logs()
+        content = self.gui.log_text.get("1.0", "end")
+        self.assertIn("[上位机] host message", content)
+        self.assertIn("[USB / ESP] E (123)", content)
+        index = self.gui.log_text.search("E (123)", "1.0")
+        self.assertIn("E", self.gui.log_text.tag_names(index))
+        for level in "WIDV":
+            index = self.gui.log_text.search(f"{level} (12", "1.0")
+            self.assertIn(level, self.gui.log_text.tag_names(index))
+        self.gui.log_source.set("USB / ESP")
+        self.gui.filter_text.set("wifi")
+        self.gui._logs()
+        content = self.gui.log_text.get("1.0", "end")
+        self.assertIn("failed", content)
+        self.assertIn("retry", content)
+        self.assertNotIn("host message", content)
+        self.assertNotIn("boot text", content)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "logs.txt"
+            with mock.patch("tcp2com_gui.filedialog.asksaveasfilename", return_value=str(path)):
+                self.gui.export_logs()
+            exported = path.read_text(encoding="utf-8")
+            self.assertIn("[上位机] host message", exported)
+            self.assertIn("[USB / ESP] E (123)", exported)
+        self.gui.clear_logs()
+        self.gui._logs()
+        self.assertNotIn("failed", self.gui.log_text.get("1.0", "end"))
 
 
 if __name__ == "__main__":

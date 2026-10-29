@@ -154,6 +154,15 @@ class USBConfigTests(unittest.TestCase):
         self.assertNotIn("private-usb-secret", "\n".join(self.messages))
         self.assertEqual(self.device.write_timeout, .5)
 
+    def test_fragmented_ansi_logs_and_protocol_are_cleaned(self):
+        self.device.inject(b"\x1b[0;31mE (123) wifi: failed\x1b[0m\r\n")
+        self.device.inject(b"\x1b[32mC5CFG {\"password\":\"secret\"}\x1b[0m\n")
+        wait_for(lambda: any("E (123) wifi: failed" in line for line in self.messages))
+        wait_for(lambda: "E (123) wifi: failed" in self.logfile.read_text(encoding="utf-8"))
+        self.assertFalse(any("\x1b" in line or "secret" in line for line in self.messages))
+        self.assertNotIn("\x1b", self.logfile.read_text(encoding="utf-8"))
+        self.assertNotIn("secret", self.logfile.read_text(encoding="utf-8"))
+
     def test_old_firmware_times_out_without_ever_sending_save(self):
         self.device.drop = "hello"
         with self.assertRaises(ConfigError):

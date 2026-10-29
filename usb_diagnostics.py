@@ -14,6 +14,7 @@ from device_capabilities import capabilities
 
 PREFIX = b"C5CFG "
 BRIDGE_PREFIX = b"BRIDGECFG "
+ANSI_CSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def parse_stats(line):
@@ -225,6 +226,7 @@ class USBMonitor:
                                 if discard:
                                     discard = False
                                     continue
+                                raw = ANSI_CSI.sub(b"", raw)
                                 if self._config_line(raw.rstrip(b"\r")):
                                     continue
                                 line = raw.decode("utf-8", errors="replace").rstrip("\r")
@@ -259,3 +261,5 @@ class USBMonitor:
         self._disconnected()
         if self.thread:
             self.thread.join(timeout=2)
+            if self.thread.is_alive():
+                raise RuntimeError("USB 线程尚未退出，端口可能仍被占用；请稍后再次断开")
