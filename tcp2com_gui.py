@@ -12,16 +12,15 @@ import re
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
 from c5_config import C5Client, ConfigError, SaveOutcomeUnknown, changed_config, public_config
 from c5_usb_config import C5USBClient
 from device_capabilities import DEVICES, BANDS, capabilities
 from gui_support import (BridgeController, atomic_json, config_job, default_settings,
-                         load_profile, read_profiles, save_profile, settings_to_args)
-from gui_state import (DRAFT_FIELDS, FORM_FIELDS, VERSION, load_state, profile_selection,
-                       restore_profile_path, save_state)
+                         load_profile, settings_to_args)
+from gui_state import DRAFT_FIELDS, FORM_FIELDS, VERSION, load_state, save_state
 from reset_control import ResetPanel
 from serial.tools import list_ports
 
@@ -128,8 +127,6 @@ class BridgeGUI:
         self._profile_base = (Path(profile_path).resolve().parent if profile_path else BASE).resolve()
         self._default_profile_path = Path(profile_path).resolve() if profile_path else self._profile_base / "tcp2com_config.json"
         self._state_path = Path(state_path) if state_path is not None else self._profile_base / "tcp2com_last_state.json"
-        self.profile_path = tk.StringVar(root, value=str(self._default_profile_path))
-        self.profile_name = tk.StringVar(root, value="c5-spi-tcp")
         self.status = tk.StringVar(root, value="已停止")
         self.applied = tk.StringVar(root, value="未启动")
         self.address = tk.StringVar(root, value="")
@@ -148,39 +145,33 @@ class BridgeGUI:
         self._build()
         self._device_defaults = self._device_values()
         saved, warning = load_state(self._state_path)
-        path_notice = None
+        self._set_settings({**default_settings(), "device": "c5", "mode": "tcp-server", "com": "COM1"})
+        migrated = False
+        migration_notice = None
         if saved:
-            selection = saved.get("profile", {})
-            try:
-                restored, path_notice = restore_profile_path(selection, self._profile_base, self._default_profile_path)
-                self.profile_path.set(str(restored))
-            except (OSError, ValueError):
-                path_notice = "上次配置文件路径无效，已使用当前程序目录的默认路径"
-            if "name" in selection:
-                self.profile_name.set(selection["name"])
             self._device_drafts = saved["device_drafts"]
-        self._profile_list()
-        profile_notice = None
-        try:
-            self._load_profile()
-        except (ValueError, OSError) as exc:
-            self._set_settings({**default_settings(), "device": "c5", "mode": "tcp-server", "com": "COM1"})
-            if "capture 文件接收功能已移除" in str(exc) or "capture 配置已移除" in str(exc):
-                profile_notice = "命名配置未加载：capture 文件接收功能已移除，请选择 COM 桥接配置"
-            elif saved and saved["profile"].get("path_base") == "absolute":
-                profile_notice = "命名配置未加载，请重新选择外部配置文件或检查配置名称"
-            else:
-                profile_notice = "命名配置未加载，请检查配置文件及配置名称"
-        if saved:
             self._restore_state(saved)
+        elif warning is None and self._default_profile_path.is_file():
+            # One-time upgrade for installations that only have the old default profile.
+            try:
+                self._set_settings(load_profile(self._default_profile_path, "c5-spi-tcp"))
+                migrated = True
+                migration_notice = "已迁移旧默认电脑配置"
+            except (ValueError, OSError):
+                migration_notice = "旧默认电脑配置无法迁移，已使用内置默认参数"
         self._state_loading = False
         self._sync()
         # Startup must not rewrite a damaged/newer file or start any connection.
         self._cancel_state_save()
         notices = (["已恢复上次界面设置；连接尚未启动"] if saved else [])
-        notices.extend(note for note in (warning, path_notice, profile_notice) if note)
+        notices.extend(note for note in (warning, migration_notice) if note)
         if notices:
             self.state_status.set("；".join(notices))
+        if migrated:
+            try:
+                save_state(self._state_path, self._state_snapshot())
+            except (OSError, ValueError):
+                self.state_status.set("旧配置已读取，但无法保存设置；请检查目录权限")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.poll_job = self.root.after(100, self.poll)
 
@@ -191,15 +182,6 @@ class BridgeGUI:
         title.pack(fill="x")
         ttk.Label(title, text="Wi-Fi 桥接工具", font=("Microsoft YaHei UI", 17, "bold")).pack(side="left")
         ttk.Label(title, textvariable=self.status, foreground="#166534").pack(side="right")
-        profiles = ttk.LabelFrame(outer, text="电脑本地配置（不写入设备）", padding=8)
-        profiles.pack(fill="x", pady=8)
-        ttk.Entry(profiles, textvariable=self.profile_path, width=30).pack(side="left", fill="x", expand=True)
-        ttk.Button(profiles, text="文件…", command=self.choose_profiles).pack(side="left", padx=4)
-        self.profile_combo = ttk.Combobox(profiles, textvariable=self.profile_name, width=18)
-        self.profile_combo.pack(side="left")
-        for text, callback in (("加载", self.load_profile), ("新建", self.new_profile),
-                               ("保存", self.save_profile), ("另存为…", self.save_as)):
-            ttk.Button(profiles, text=text, width=8, command=callback).pack(side="left", padx=2)
         actions = ttk.Frame(outer)
         actions.pack(fill="x", pady=(0, 8))
         self.start_button = ttk.Button(actions, text="启动", command=lambda: self.start("start"))
@@ -274,18 +256,49 @@ class BridgeGUI:
         self.usb_tree.heading("value", text="最近值")
         self.usb_tree.grid(row=self.usb_form.row, column=0, columnspan=3, sticky="ew", pady=8)
         self._build_logs()
-        footer = ttk.Frame(outer, padding=(0, 8, 0, 0))
-        footer.pack(fill="x")
+        self.footer = ttk.Frame(outer, padding=(0, 8, 0, 0))
+        self.footer.pack(side="bottom", fill="x", before=self.tabs)
+        self.footer_canvas = tk.Canvas(self.footer, highlightthickness=0, height=1)
+        footer_scroll = ttk.Scrollbar(self.footer, orient="vertical", command=self.footer_canvas.yview)
+        footer_scroll.pack(side="right", fill="y")
+        self.footer_canvas.pack(side="left", fill="both", expand=True)
+        self.footer_canvas.configure(yscrollcommand=footer_scroll.set)
+        footer_content = ttk.Frame(self.footer_canvas)
+        footer_window = self.footer_canvas.create_window((0, 0), window=footer_content, anchor="nw")
+        self.footer_labels = []
         for variable in (self.runtime, self.address, self.rates, self.totals, self.bridge_detail):
-            ttk.Label(footer, textvariable=variable, wraplength=1050).pack(anchor="w")
-        ttk.Label(footer, textvariable=self.state_status, wraplength=1050).pack(anchor="w")
+            label = ttk.Label(footer_content, textvariable=variable, justify="left")
+            label.pack(fill="x", anchor="w")
+            self.footer_labels.append(label)
+        label = ttk.Label(footer_content, textvariable=self.state_status, justify="left")
+        label.pack(fill="x", anchor="w")
+        self.footer_labels.append(label)
+
+        def resize_footer(_event=None):
+            self.footer_canvas.configure(scrollregion=self.footer_canvas.bbox("all"))
+            height = min(footer_content.winfo_reqheight(), max(80, self.root.winfo_height() // 3))
+            if int(self.footer_canvas.cget("height")) != height:
+                self.footer_canvas.configure(height=height)
+
+        def resize_footer_width(event):
+            self.footer_canvas.itemconfigure(footer_window, width=event.width)
+            for label in self.footer_labels:
+                label.configure(wraplength=max(1, event.width - 4))
+
+        def scroll_footer(event):
+            self.footer_canvas.yview_scroll(-int(event.delta / 120), "units")
+            return "break"
+
+        footer_content.bind("<Configure>", resize_footer)
+        self.footer_canvas.bind("<Configure>", resize_footer_width)
+        self.root.bind("<Configure>", lambda event: resize_footer() if event.widget is self.root else None, add="+")
+        for widget in (self.footer_canvas, footer_content, *self.footer_labels):
+            widget.bind("<MouseWheel>", scroll_footer)
         for form in (self.network, self.local, self.advanced, self.usb_form):
             for variable in form.variables.values():
                 variable.trace_add("write", lambda *_: self._sync())
         self.config_transport.trace_add("write", lambda *_: self._sync())
         self.config_url.trace_add("write", lambda *_: self._sync())
-        self.profile_path.trace_add("write", lambda *_: self._schedule_state_save())
-        self.profile_name.trace_add("write", lambda *_: self._schedule_state_save())
 
     def _tab(self, text):
         frame = ttk.Frame(self.tabs)
@@ -465,7 +478,6 @@ class BridgeGUI:
 
     def _state_snapshot(self):
         return {"version": VERSION,
-                "profile": profile_selection(self.profile_path.get(), self.profile_name.get(), self._profile_base),
                 "forms": {name: {key: getattr(self, name).get(key) for key in fields}
                           for name, fields in FORM_FIELDS.items()},
                 "config_transport": "usb" if self.config_transport.get() == "USB" else "http",
@@ -604,63 +616,6 @@ class BridgeGUI:
                               "当前配置待明确保存并重启" if needs_save else "与上次读取一致")
         except ValueError:
             self.c5_dirty.set("编辑未保存，请检查参数")
-
-    def _profile_file(self):
-        # Typed relative paths use the same base as restored paths, regardless of cwd.
-        return (self._profile_base / self.profile_path.get()).resolve()
-
-    def _profile_list(self):
-        try:
-            self.profile_combo.configure(values=list(read_profiles(self._profile_file())))
-        except (ValueError, OSError):
-            self.profile_combo.configure(values=())
-
-    def _load_profile(self):
-        self._set_settings(load_profile(self._profile_file(), self.profile_name.get()))
-        self._sync()
-
-    def load_profile(self):
-        if self.http_busy:
-            return
-        try:
-            self._load_profile()
-            self.controller.ui.message("已加载电脑本地参数；运行中的桥接需点击“应用参数并重启”")
-        except (ValueError, OSError) as exc:
-            self.error(exc)
-
-    def choose_profiles(self):
-        path = filedialog.askopenfilename(parent=self.root, filetypes=[("JSON", "*.json")])
-        if path:
-            self.profile_path.set(path)
-            self._profile_list()
-
-    def new_profile(self):
-        if self.http_busy:
-            return
-        name = simpledialog.askstring("新建电脑配置", "配置名称", parent=self.root)
-        if name:
-            self.profile_name.set(name)
-            self._set_settings({**default_settings(), "device": "c5", "mode": "tcp-server", "com": "COM1"})
-
-    def save_profile(self):
-        try:
-            save_profile(self._profile_file(), self.profile_name.get(), self.settings())
-            self._profile_list()
-            self.controller.ui.message("电脑配置已保存；未改变运行参数，未写入设备")
-        except (ValueError, OSError) as exc:
-            self.error(exc)
-
-    def save_as(self):
-        path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".json", filetypes=[("JSON", "*.json")])
-        if path:
-            previous = self.profile_path.get()
-            self.profile_path.set(path)
-            try:
-                save_profile(self._profile_file(), self.profile_name.get(), self.settings())
-                self._profile_list()
-            except (ValueError, OSError) as exc:
-                self.profile_path.set(previous)
-                self.error(exc)
 
     def browse_field(self, form, key):
         path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".log")

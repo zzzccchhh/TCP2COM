@@ -76,7 +76,8 @@ def clean_state(document):
         warnings.append("forms")
     for group, fields in FORM_FIELDS.items():
         result["forms"][group] = _group(forms.get(group, {}), fields, group, warnings)
-    result["profile"] = _group(document.get("profile", {}), ("path", "name", "path_base"), "profile", warnings)
+    if "profile" in document:
+        result["profile"] = _group(document["profile"], ("path", "name", "path_base"), "profile", warnings)
     for key, choices in (("config_transport", ("http", "usb")),):
         if key in document:
             if document[key] in choices:
@@ -170,6 +171,7 @@ def load_state(path):
 
 def save_state(path, document):
     cleaned, _ = clean_state(document)
+    cleaned.pop("profile", None)
     if len(json.dumps(cleaned, ensure_ascii=False, indent=2).encode("utf-8")) + 1 > MAX_BYTES:
         raise ValueError("界面设置过大")
     atomic_json(path, cleaned)

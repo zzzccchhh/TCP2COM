@@ -220,9 +220,9 @@ class GUITests(unittest.TestCase):
 
     def test_local_save_does_not_write_device_or_change_running_connection(self):
         with mock.patch("tcp2com_gui.C5Client.save") as save_device:
-            self.gui.save_profile()
+            self.gui._save_last_state()
             save_device.assert_not_called()
-        self.assertTrue(Path(self.gui.profile_path.get()).exists())
+        self.assertTrue(self.gui._state_path.exists())
         self.assertIsNone(self.gui.controller.snapshot()[0])
 
     def test_c5_undo_backup_import_never_persist_passwords(self):
@@ -449,7 +449,7 @@ class GUITests(unittest.TestCase):
         self.gui.root.iconify()
         self.gui.local.set("baud", "230400")
         wait_for(lambda: self.gui.applied.get() == "参数未应用", self.root.update)
-        self.gui.save_profile()
+        self.gui._save_last_state()
         self.assertIs(self.gui.controller.snapshot()[0], app)
         self.assertEqual(app.args.baud, 1152000)
         self.assertFalse(app.close_event.is_set())
@@ -652,14 +652,13 @@ class GUITests(unittest.TestCase):
             wait_for(lambda: not self.gui.http_busy, self.root.update)
         self.assertIsNotNone(self.gui.baseline)
 
-    def test_usb_transport_profile_roundtrip_without_device_write(self):
+    def test_usb_transport_state_saved_without_device_write(self):
         self.gui.config_transport.set("USB")
         self.gui.usb_form.set("usb_port", "COM8")
-        self.gui.save_profile()
-        self.gui.config_transport.set("Wi-Fi HTTP")
-        self.gui.load_profile()
-        self.assertEqual(self.gui.config_transport.get(), "USB")
-        self.assertEqual(self.gui.usb_form.get("usb_port"), "COM8")
+        self.gui._save_last_state()
+        saved = json.loads(self.gui._state_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["config_transport"], "usb")
+        self.assertEqual(saved["forms"]["usb_form"]["usb_port"], "COM8")
         self.assertIsNone(self.gui.controller.snapshot()[1])
 
     def test_close_waits_for_inflight_http_without_worker_holding_tk(self):
@@ -678,6 +677,35 @@ class GUITests(unittest.TestCase):
             release.set()
             wait_for(lambda: self.gui.destroyed, self.root.update)
             self.assertFalse(self.gui.http_thread.is_alive())
+
+    def test_footer_remains_visible_and_scrollable_when_window_shrinks(self):
+        self.root.tk.call("tk", "scaling", 2.0)
+        self.root.deiconify()
+        self.gui.last_refresh = time.monotonic() + 60
+        self.gui.runtime.set("正在使用：c5 / tcp-server · COM123 / 1152000")
+        self.gui.address.set("本地 192.168.137.200:8080 · 对端 192.168.137.201:6060")
+        self.gui.rates.set("网络接收 / 本地写入 / 网络发送：123456 B/s")
+        self.gui.totals.set("队列 128 / 128 · 累计丢弃 123456 / 123456 B · UDP 收/发/拒绝 123/456/789")
+        self.gui.bridge_detail.set("网络→COM待写 123456 B · COM写均值/最大 123456/123456 us · " * 40)
+        self.gui.state_status.set("已记住界面设置；下次启动自动恢复")
+        for width, height in ((1120, 820), (900, 650)):
+            self.root.geometry(f"{width}x{height}+30000+30000")
+            self.root.update()
+            canvas = self.gui.footer_canvas
+            self.assertGreater(canvas.winfo_height(), 1)
+            self.assertLessEqual(canvas.winfo_rooty() + canvas.winfo_height(),
+                                 self.root.winfo_rooty() + self.root.winfo_height())
+            self.assertGreater(self.gui.tabs.winfo_height(), 150)
+            for label in self.gui.footer_labels:
+                self.assertLessEqual(int(label.cget("wraplength")), canvas.winfo_width())
+            self.assertLess(canvas.yview()[1], 1.0)
+            canvas.yview_moveto(1.0)
+            self.root.update()
+            self.assertAlmostEqual(canvas.yview()[1], 1.0)
+            last = self.gui.footer_labels[-1]
+            self.assertLessEqual(last.winfo_rooty() + last.winfo_height(),
+                                 canvas.winfo_rooty() + canvas.winfo_height())
+            canvas.yview_moveto(0)
 
     def test_dpi_layout_and_bounded_filtered_logs(self):
         self.root.tk.call("tk", "scaling", 2.0)

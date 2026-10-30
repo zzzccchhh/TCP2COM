@@ -259,16 +259,14 @@ class GUIStateTests(unittest.TestCase):
             self.open_gui()
         self.assertEqual(self.gui.network.get("device"), "s3")
         self.assertEqual(self.gui.local.get("com"), "COM99")
-        self.assertEqual(self.gui.profile_name.get(), "s3-capture")
         self.assertIn("已移除", self.gui.state_status.get())
-        self.assertIn("COM 桥接配置", self.gui.state_status.get())
         self.assertNotIn("capture", self.gui._state_snapshot()["forms"]["local"])
         self.assertNotIn("output", self.gui._state_snapshot())
         self.assertEqual(self.state.read_bytes(), before)
         self.assertEqual(recording.read_bytes(), b"existing data")
 
-    def test_debounce_saves_once_without_overwriting_named_profiles(self):
-        self.gui.save_profile()
+    def test_debounce_saves_once_without_overwriting_old_profiles(self):
+        self.profile.write_text('{"profiles":{}}', encoding="utf-8")
         original = self.profile.read_bytes()
         with mock.patch("tcp2com_gui.save_state", wraps=save_state) as writer:
             for value in ("8081", "8082", "8083"):
@@ -277,112 +275,40 @@ class GUIStateTests(unittest.TestCase):
             self.assertEqual(writer.call_count, 1)
         saved, _ = load_state(self.state)
         self.assertEqual(saved["forms"]["network"]["port"], "8083")
+        self.assertNotIn("profile", saved)
         self.assertEqual(self.profile.read_bytes(), original)
 
-    def test_selected_existing_profile_is_remembered_and_last_edits_take_priority(self):
-        self.gui.profile_name.set("my-profile")
-        self.gui.save_profile()
-        original = self.profile.read_bytes()
-        self.gui.network.set("device", "s3")
-        self.gui.network.set("mode", "tcp-client")
-        self.gui.network.set("host", "192.168.4.1")
-        self.gui.network.set("port", "9001")
+    def test_existing_state_restores_without_reading_legacy_profile(self):
         self.close_gui()
-        self.open_gui()
-        self.assertEqual(self.gui.profile_name.get(), "my-profile")
-        self.assertEqual(self.gui.profile_path.get(), str(self.profile))
-        self.assertEqual(self.gui.network.get("device"), "s3")
-        self.assertEqual(self.gui.network.get("mode"), "tcp-client")
-        self.assertEqual(self.gui.network.get("port"), "9001")
-        self.assertEqual(self.profile.read_bytes(), original)
-
-    def test_folder_copy_restores_profiles_and_drafts_with_or_without_original(self):
-        for legacy, remove_original in ((False, False), (False, True), (True, False), (True, True)):
-            with self.subTest(legacy=legacy, remove_original=remove_original):
-                self.gui.profile_name.set("my-profile")
-                self.gui.save_profile()
-                self.gui.network.set("device", "esp01s")
-                self.gui.network.set("mode", "tcp-client")
-                self.gui.network.set("host", "192.168.4.1")
-                self.gui.network.set("port", "9001")
-                self.close_gui()
-                original_profile, original_state = self.profile, self.state
-                profile_bytes = original_profile.read_bytes()
-                state_bytes = original_state.read_bytes()
-                destination = original_profile.parent / "拷贝 中文目录"
-                destination.mkdir()
-                self.profile = destination / original_profile.name
-                self.state = destination / original_state.name
-                shutil.copyfile(original_profile, self.profile)
-                shutil.copyfile(original_state, self.state)
-                if legacy:
-                    document = json.loads(self.state.read_text(encoding="utf-8"))
-                    document["profile"] = {"path": str(original_profile), "name": "my-profile"}
-                    self.state.write_text(json.dumps(document), encoding="utf-8")
-                if remove_original:
-                    original_profile.unlink()
-                    original_state.unlink()
-                copied_state = self.state.read_bytes()
-                with mock.patch("tcp2com_gui.BridgeController.submit", side_effect=AssertionError("auto start")), \
-                        mock.patch("usb_diagnostics.serial.serial_for_url", side_effect=AssertionError("auto USB")), \
-                        mock.patch("c5_config.C5Client.save", side_effect=AssertionError("auto device save")):
-                    self.open_gui()
-                self.assertEqual(self.gui.profile_path.get(), str(self.profile))
-                self.assertIn("my-profile", self.gui.profile_combo["values"])
-                self.assertEqual(self.gui.network.get("device"), "esp01s")
-                self.assertEqual(self.gui.network.get("port"), "9001")
-                self.assertEqual(self.profile.read_bytes(), profile_bytes)
-                self.assertEqual(self.state.read_bytes(), copied_state)
-                self.assertIsNone(self.gui._state_job)
-                selection = self.gui._state_snapshot()["profile"]
-                self.assertEqual(selection["path"], self.profile.name)
-                self.assertEqual(selection["path_base"], "program")
-                if not remove_original:
-                    self.assertEqual(original_profile.read_bytes(), profile_bytes)
-                    self.assertEqual(original_state.read_bytes(), state_bytes)
-
-    def test_missing_external_profile_warns_without_discarding_drafts_or_using_local_namesake(self):
-        self.gui.save_profile()
-        self.close_gui()
-        external = self.profile.parent.parent / (self.profile.parent.name + "-missing") / self.profile.name
         document = snapshot()
-        document["profile"] = {"path": str(external), "name": "my-profile", "path_base": "absolute"}
-        save_state(self.state, document)
-        original = self.profile.read_bytes()
-        self.open_gui()
-        self.assertEqual(self.gui.profile_path.get(), str(external))
-        self.assertFalse(self.gui.profile_combo["values"])
-        self.assertIn("命名配置未加载", self.gui.state_status.get())
-        self.assertIn("已恢复上次界面设置", self.gui.state_status.get())
+        document["profile"] = {"path": "missing.json", "name": "old", "path_base": "program"}
+        self.state.write_text(json.dumps(document), encoding="utf-8")
+        before = self.state.read_bytes()
+        with mock.patch("tcp2com_gui.load_profile", side_effect=AssertionError("unexpected profile read")):
+            self.open_gui()
         self.assertEqual(self.gui.network.get("mode"), "udp")
-        self.assertEqual(self.profile.read_bytes(), original)
+        self.assertEqual(self.gui.local.get("com"), "COM99")
+        self.assertEqual(self.state.read_bytes(), before)
+        self.assertNotIn("profile", self.gui._state_snapshot())
 
-    def test_typed_relative_profile_load_and_save_use_program_directory(self):
-        self.gui.profile_path.set("relative.json")
-        self.gui.profile_name.set("relative-profile")
-        with mock.patch("os.getcwd", return_value=str(self.profile.parent.parent)):
-            self.gui.save_profile()
-            self.gui.network.set("port", "9009")
-            self.gui._load_profile()
-        self.assertTrue((self.profile.parent / "relative.json").is_file())
-        self.assertEqual(self.gui.network.get("port"), "8080")
-
-    def test_without_state_file_still_loads_saved_profile_but_not_unsaved_draft(self):
-        self.gui.network.set("device", "esp01s")
-        self.gui.network.set("mode", "tcp-client")
-        self.gui.network.set("host", "192.168.4.1")
-        self.gui.network.set("port", "8123")
-        self.gui.save_profile()
-        self.gui.network.set("port", "9009")
+    def test_migrates_default_profile_once_when_state_missing(self):
         self.close_gui()
-        profile_bytes = self.profile.read_bytes()
         self.state.unlink()
-        self.open_gui()
-        self.assertEqual(self.gui.network.get("device"), "esp01s")
+        self.profile.write_text(json.dumps({"profiles": {"c5-spi-tcp": {
+            "device": "s3", "mode": "tcp-client", "host": "192.168.4.1",
+            "port": 8123, "com": "COM5", "baud": 1152000}}}), encoding="utf-8")
+        original = self.profile.read_bytes()
+        with mock.patch("tcp2com_gui.BridgeController.submit", side_effect=AssertionError("auto start")):
+            self.open_gui()
+        self.assertEqual(self.gui.network.get("device"), "s3")
         self.assertEqual(self.gui.network.get("port"), "8123")
-        self.assertEqual(self.profile.read_bytes(), profile_bytes)
-        self.assertFalse(self.state.exists())
-        self.assertNotIn("未加载", self.gui.state_status.get())
+        self.assertIn("迁移", self.gui.state_status.get())
+        self.assertTrue(self.state.exists())
+        self.assertEqual(self.profile.read_bytes(), original)
+        self.close_gui()
+        self.profile.unlink()
+        self.open_gui()
+        self.assertEqual(self.gui.network.get("port"), "8123")
 
     def test_device_drafts_are_separate_and_require_a_fresh_read(self):
         self.gui.c5_forms["common"].set("link_mode", 2)
@@ -442,7 +368,6 @@ class GUIStateTests(unittest.TestCase):
         self.close_gui()
         save_state(self.state, snapshot())
         self.open_gui()
-        self.assertEqual(self.gui.profile_name.get(), "上次连接")
         self.assertEqual(self.gui.network.get("mode"), "udp")
         self.assertEqual(self.gui.c5_forms["common"].get("link_mode"), 2)
         self.close_gui()
