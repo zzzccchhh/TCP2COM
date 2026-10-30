@@ -37,6 +37,8 @@ def public_config(document, device="c5"):
             result[name] = {key: copy.deepcopy(document[name][key]) for key in STATION_FIELDS}
     except (KeyError, TypeError) as exc:
         raise ConfigError("配置缺少必要字段，请检查固件版本") from exc
+    if device == "c5" and "reset_pin" in document:
+        result["reset_pin"] = copy.deepcopy(document["reset_pin"])
     for key in NETWORK_FIELDS:
         if key in document:
             result[key] = copy.deepcopy(document[key])
@@ -103,6 +105,12 @@ def validate_config(config, device="c5"):
                            ("baud", 9600, 5000000), ("tcp_port", 1024, 65535), ("ap_channel", 1, 165)):
         if type(config.get(key)) is not int or not low <= config[key] <= high:
             raise ConfigError(f"{key} 必须为 {low}～{high} 的整数")
+    if "reset_pin" in config and (device != "c5" or type(config["reset_pin"]) is not int or not 0 <= config["reset_pin"] <= 4):
+        raise ConfigError("复位线必须为 0～4")
+    if config.get("reset_pin", 0) and config["link_mode"] != 1 and (
+            (config.get("net_role", 0) == 0 and config["tcp_port"] == 8081) or
+            (config.get("net_role", 0) == 1 and config.get("local_port") == 8081)):
+        raise ConfigError("复位控制 TCP 端口 8081 与业务端口冲突")
     for key, low, high in (("net_role",0,2),("remote_port",1,65535),("local_port",0,65535),
                            ("reconnect_ms",100,60000),("connect_timeout_ms",100,60000),
                            ("up_kb",64,6144),("down_kb",64,2048)):
@@ -160,7 +168,7 @@ def changed_config(baseline, edited, passwords=None, clear_passwords=(), device=
         else:
             candidate[name]["password"] = value
     validate_config(candidate, device)
-    patch = {key: candidate[key] for key in TOP_FIELDS + NETWORK_FIELDS
+    patch = {key: candidate[key] for key in TOP_FIELDS + NETWORK_FIELDS + ("reset_pin",)
              if key in candidate and candidate[key] != base.get(key)}
     if "ap_password" in candidate:
         patch["ap_password"] = candidate["ap_password"]

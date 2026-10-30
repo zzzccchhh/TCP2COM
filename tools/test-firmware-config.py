@@ -128,6 +128,8 @@ def run_pair(args, link_mode=1, net_role=0, drop_save=False):
             patch = {"baud": 921600, "link_mode": 1, "mode": 2,
                      "shared": {"ssid": "USB-pair-test", "password": "pair-test-secret", "static_ip": False}}
             if args.device == "c5":
+                if "reset_pin" in config:
+                    patch["reset_pin"] = link_mode + 1
                 band, channel = ((0, 6), (1, 36), (2, 6))[link_mode]
                 patch.update(link_mode=link_mode, band=band, ap_channel=channel, net_role=net_role,
                              auto_reconnect=False, remote_ip="192.168.137.99", remote_port=9000,

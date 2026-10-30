@@ -45,7 +45,7 @@ class FiveClickGate:
         self.count = 0
 
 
-def perform_reset(host, port, progress, cancel, timeout=5.0):
+def perform_reset(host, port, progress, cancel, timeout=5.0, *, device="esp01s"):
     """仅发送一次 RESET；收到匹配编号的 DONE 才认定完成。"""
     attempted = False
     try:
@@ -77,7 +77,8 @@ def perform_reset(host, port, progress, cancel, timeout=5.0):
                     pending.extend(data)
 
             # 先验证固件协议，旧固件/错误端口不会收到 RESET 命令。
-            if read_line() != "ESP01S-RESET/1 READY":
+            greeting = "C5-RESET/1 READY" if device == "c5" else "ESP01S-RESET/1 READY"
+            if read_line() != greeting:
                 raise ResetError("控制协议不匹配，请检查固件和控制端口")
             if cancel.is_set():
                 raise ResetError("控制操作已取消")
@@ -89,7 +90,7 @@ def perform_reset(host, port, progress, cancel, timeout=5.0):
                 attempted = False
                 raise ResetError("ESP 正在执行其他复位，本次未执行")
             if response == f"STARTED {request_id}":
-                progress("ESP 已开始复位：GPIO0 拉低，GPIO2 快闪")
+                progress("C5 已开始复位：所选引脚拉低，数据灯快速呼吸" if device == "c5" else "ESP 已开始复位：GPIO0 拉低，GPIO2 快闪")
                 response = read_line()
             if response != f"DONE {request_id}":
                 raise ResetError("控制响应无效或请求编号不匹配")
@@ -155,134 +156,183 @@ class ConsoleResetController:
 
 
 class ResetPanel:
-    def __init__(self, app, parent):
-        # Tk 在主线程创建和更新；网络线程只写事件队列。
+    """Single window for the selected device; in-flight requests keep their target."""
+    def __init__(self, app, parent, *, device="esp01s", host=""):
         import tkinter as tk
-
         self.tk = tk
-        self.app = app
+        self.app = None
+        self.device = None
         self.root = tk.Toplevel(parent)
         self.root.withdraw()
-        self.root.title("TCP ↔ COM · 远程复位")
+        self.root.title("远程复位")
         self.gate = FiveClickGate()
         self.events = queue.Queue()
         self.cancel = threading.Event()
         self.worker = None
         self.closed = False
-        tk.Label(self.root, text=f"{app.args.host}:{app.args.control_port} → 外部单片机复位",
-                 font=("Microsoft YaHei UI", 11)).pack(pady=(14, 6))
-        self.bridge_state = tk.StringVar(master=self.root, value="桥接连接中…")
+        self.active_device = None
+        self.host = tk.StringVar(master=self.root, value=host)
+        self.port = tk.StringVar(master=self.root, value="8081")
+        self.device_text = tk.StringVar(master=self.root)
+        self.bridge_state = tk.StringVar(master=self.root)
+        self.hint = tk.StringVar(master=self.root)
+        tk.Label(self.root, textvariable=self.device_text, font=("Microsoft YaHei UI", 11)).pack(pady=(14, 6))
         tk.Label(self.root, textvariable=self.bridge_state).pack()
-        self.button = tk.Button(
-            self.root, text="急停 / 复位", command=self.click,
-            bg="#b91c1c", fg="white", activebackground="#991b1b",
-            activeforeground="white", font=("Microsoft YaHei UI", 19, "bold"),
-            width=18, height=2,
-        )
+        self.address_frame = tk.Frame(self.root)
+        tk.Label(self.address_frame, text="C5 设备 IPv4 地址").pack(side="left")
+        tk.Entry(self.address_frame, textvariable=self.host, width=18).pack(side="left", padx=5)
+        tk.Label(self.address_frame, text="控制端口").pack(side="left")
+        tk.Entry(self.address_frame, textvariable=self.port, width=7).pack(side="left", padx=5)
+        self.address_frame.pack(padx=12, pady=5)
+        self.button = tk.Button(self.root, text="复位外部主控", command=self.click,
+                                bg="#b91c1c", fg="white", activebackground="#991b1b",
+                                activeforeground="white", font=("Microsoft YaHei UI", 19, "bold"),
+                                width=18, height=2)
         self.button.pack(pady=10)
-        tk.Label(self.root, text="3 秒内点击 5 次触发 · GPIO0 拉低 1 秒后释放").pack()
+        tk.Label(self.root, textvariable=self.hint).pack()
         self.status = tk.StringVar(master=self.root, value="等待操作（0/5）")
-        tk.Label(self.root, textvariable=self.status, wraplength=520,
-                 fg="#374151").pack(padx=12, pady=10)
+        tk.Label(self.root, textvariable=self.status, wraplength=520, fg="#374151").pack(padx=12, pady=10)
+        self.set_context(device, app, host)
         self._fit_contents()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.poll_job = self.root.after(50, self.poll)
 
     def _fit_contents(self):
-        # 字体缩放和多行结果会改变所需高度，不能固定为 300px。
         self.root.update_idletasks()
         width = max(500, self.root.winfo_reqwidth())
         height = max(280, self.root.winfo_reqheight())
         self.root.minsize(width, height)
-        self.root.geometry(
-            f"{max(560, width, self.root.winfo_width())}x"
-            f"{max(300, height, self.root.winfo_height())}"
-        )
+        self.root.geometry(f"{max(560, width, self.root.winfo_width())}x"
+                           f"{max(300, height, self.root.winfo_height())}")
 
     def _set_status(self, message):
         self.status.set(message)
         self._fit_contents()
 
-    def show(self):
+    def set_context(self, device, app=None, host=""):
         if self.closed:
             return
-        self.root.deiconify()
-        self.root.lift()
-        self.root.focus_set()
+        changed = device != self.device
+        target_changed = changed or (device == "esp01s" and app is not self.app)
+        self.device, self.app = device, app
+        if target_changed and not self.gate.busy:
+            self.gate.finish()
+            self.status.set("等待操作（0/5）")
+        if changed and device == "c5" and not self.host.get():
+            self.host.set(host)
+        labels = {"c5": "ESP32-C5", "esp01s": "ESP-01S", "s3": "ESP32-S3"}
+        self.device_text.set(f"当前设备：{labels.get(device, device)} · 外部主控复位")
+        if device == "c5":
+            self.address_frame.pack(before=self.button, padx=12, pady=5)
+            self.hint.set("3 秒内点击 5 次 · 所选引脚开漏拉低约 1 秒")
+        else:
+            self.address_frame.pack_forget()
+            self.hint.set("3 秒内点击 5 次 · GPIO0 拉低 1 秒后释放" if device == "esp01s"
+                          else "当前固件不支持远程复位")
+        self._refresh_state()
+
+    def _available(self):
+        if self.device == "c5":
+            return True
+        return (self.device == "esp01s" and self.app is not None and
+                not self.app.close_event.is_set() and not getattr(self.app.args, "no_reset_ui", False) and
+                getattr(self.app.args, "device", "esp01s") == "esp01s")
+
+    def _refresh_state(self):
+        if self.gate.busy:
+            self.bridge_state.set(f"{self.active_device} 复位请求进行中；完成前不能再次触发")
+        elif self.device == "c5":
+            self.bridge_state.set("控制连接独立于业务桥接")
+        elif self.device == "esp01s" and self._available():
+            sock, _ = self.app.conn.snapshot()
+            self.bridge_state.set(f"透传 {'已连接' if sock is not None else '未连接 / 重连中'}"
+                                  f" · {self.app.args.com} · {self.app.args.baud} baud"
+                                  f" · {self.app.args.host}:{self.app.args.control_port}")
+        elif self.device == "esp01s":
+            self.bridge_state.set("请启动 ESP-01S TCP 客户端桥接并启用复位入口")
+        else:
+            self.bridge_state.set("当前设备不支持远程复位")
+        self.button.configure(state=self.tk.NORMAL if self._available() and not self.gate.busy else self.tk.DISABLED)
+
+    def show(self):
+        if self.closed: return
+        self.root.deiconify(); self.root.lift(); self.root.focus_set()
 
     def click(self):
-        if self.closed or self.app.close_event.is_set() or self.gate.busy:
-            return
+        if self.closed or self.gate.busy or not self._available(): return
         if not self.gate.click(time.monotonic()):
             self._set_status(f"已点击 {self.gate.count}/5（从首次点击起 3 秒内完成）")
             return
-        self.button.configure(state=self.tk.DISABLED)
-        self._set_status("正在发送复位请求…")
-        # The worker must not retain Tk objects, even while the window is closing.
+        if self.device == "c5":
+            try:
+                import ipaddress
+                host = str(ipaddress.IPv4Address(self.host.get().strip()))
+                port = int(self.port.get())
+                if not 1 <= port <= 65535: raise ValueError()
+            except ValueError:
+                self.gate.finish(); self._set_status("请输入有效的 C5 IPv4 地址和端口")
+                self._refresh_state()
+                return
+        else:
+            host, port = self.app.args.host, self.app.args.control_port
+        device = self.device
+        self.active_device = "ESP32-C5" if device == "c5" else "ESP-01S"
+        notify = getattr(getattr(self.app, "ui", None), "message", lambda _: None)
+        self._refresh_state()
+        self._set_status(f"正在向 {self.active_device} 发送复位请求…")
         self.worker = threading.Thread(target=self.request_reset,
-                                       args=(self.app.args.host, self.app.args.control_port,
-                                             self.events, self.cancel, self.app.ui.message),
+                                       args=(host, port, self.events, self.cancel, notify, device),
                                        name="remote-reset", daemon=True)
         self.worker.start()
 
     @staticmethod
-    def request_reset(host, port, events, cancel, notify):
+    def request_reset(host, port, events, cancel, notify, device="esp01s"):
         try:
-            perform_reset(
-                host, port, lambda text: events.put((False, text)), cancel,
-            )
-            message = "复位完成：GPIO0 已释放，恢复正常状态灯"
+            if device == "esp01s":
+                perform_reset(host, port, lambda text: events.put((False, text)), cancel)
+                message = "复位完成：GPIO0 已释放，恢复正常状态灯"
+            else:
+                perform_reset(host, port, lambda text: events.put((False, text)), cancel, device="c5")
+                message = "复位输出已释放；请检查主控状态"
         except ResetError as exc:
             message = str(exc)
+        message = f"{'ESP32-C5' if device == 'c5' else 'ESP-01S'}：{message}"
         notify(message)
         events.put((True, message))
 
     def poll(self):
         self.poll_job = None
-        if self.closed:
-            return
-        if self.app.close_event.is_set():
-            self.shutdown()
-            return
+        if self.closed: return
         old_count = self.gate.count
         self.gate.expire(time.monotonic())
         if old_count and not self.gate.count:
             self._set_status("点击超时，已清零（0/5）")
         while True:
-            try:
-                finished, message = self.events.get_nowait()
-            except queue.Empty:
-                break
+            try: finished, message = self.events.get_nowait()
+            except queue.Empty: break
+            if not finished and self.active_device:
+                message = f"{self.active_device}：{message}"
             self._set_status(message)
             if finished:
                 self.gate.finish()
-                self.button.configure(state=self.tk.NORMAL)
-        sock, _ = self.app.conn.snapshot()
-        self.bridge_state.set(
-            f"透传 {'已连接' if sock is not None else '未连接 / 重连中'}"
-            f" · {self.app.args.com} · {self.app.args.baud} baud"
-        )
+                self.active_device = None
+        self._refresh_state()
         self.poll_job = self.root.after(50, self.poll)
 
     def close(self):
-        """仅隐藏面板；已发送的请求继续执行并保留结果。"""
-        if self.closed:
-            return
+        if self.closed: return
         self.root.withdraw()
         if not self.gate.busy and self.gate.count:
             self.gate.finish()
             self._set_status("等待操作（0/5）")
 
     def shutdown(self):
-        """整个程序退出时才取消控制等待并销毁面板。"""
-        if self.closed:
-            return
+        if self.closed: return
         self.closed = True
         self.cancel.set()
         if self.poll_job is not None:
             self.root.after_cancel(self.poll_job)
             self.poll_job = None
         self.root.destroy()
-        # Release Tcl-backed variables on the UI thread, not later in a worker's GC.
         self.status = None
         self.bridge_state = None

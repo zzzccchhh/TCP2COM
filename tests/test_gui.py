@@ -203,7 +203,7 @@ class GUITests(unittest.TestCase):
 
     def test_mode_fields_device_capabilities_and_local_output(self):
         self.assertEqual(self.gui.network.get("device"), "c5")
-        self.assertEqual(str(self.gui.reset_button["state"]), "disabled")
+        self.assertEqual(str(self.gui.reset_button["state"]), "normal")
         self.gui.network.set("mode", "udp")
         self.assertEqual(str(self.gui.network.widgets["peer_port"]["state"]), "normal")
         self.gui.network.set("mode", "tcp-client")
@@ -217,6 +217,50 @@ class GUITests(unittest.TestCase):
         self.gui.network.set("device", "esp01s")
         self.assertIsNone(self.gui.baseline)
         self.assertEqual(self.gui.tabs.tab(self.gui.c5_frame, "state"), "disabled")
+
+    def test_single_reset_window_switches_devices_without_repeating_inflight_request(self):
+        started, release = threading.Event(), threading.Event()
+        def request(host, port, progress, cancel, **kwargs):
+            self.assertEqual((host, port, kwargs.get("device")), ("127.0.0.1", 8081, "c5"))
+            started.set()
+            if not release.wait(3):
+                raise AssertionError("reset was not released")
+            self.assertFalse(cancel.is_set())
+        request_patch = mock.patch("reset_control.perform_reset", side_effect=request)
+        request_patch.start()
+        self.addCleanup(request_patch.stop)
+        self.gui.show_reset()
+        panel = self.gui.reset_panel
+        panel.root.geometry("+30000+30000")
+        panel.host.set("127.0.0.1")
+        for _ in range(5): panel.button.invoke()
+        self.assertTrue(started.wait(1))
+        try:
+            self.gui.network.set("device", "s3")
+            self.root.update()
+            self.assertIs(self.gui.reset_panel, panel)
+            self.assertEqual(panel.device, "s3")
+            self.assertEqual(str(panel.button["state"]), "disabled")
+            self.assertIn("ESP32-C5", panel.bridge_state.get())
+            panel.close()
+            self.assertFalse(panel.cancel.is_set())
+            self.gui.show_reset()
+            self.assertIs(self.gui.reset_panel, panel)
+            release.set()
+            panel.worker.join(2)
+            wait_for(lambda: not panel.gate.busy, self.root.update)
+            self.assertIn("ESP32-C5", panel.status.get())
+            self.assertEqual(str(panel.button["state"]), "disabled")
+            self.gui.network.set("device", "esp01s")
+            self.root.update()
+            self.assertIn("请启动", panel.bridge_state.get())
+            self.gui.network.set("device", "c5")
+            self.root.update()
+            self.assertEqual(str(panel.button["state"]), "normal")
+            self.assertEqual(panel.host.get(), "127.0.0.1")
+            self.assertEqual(sum(child.winfo_class() == "Toplevel" for child in self.root.winfo_children()), 1)
+        finally:
+            release.set()
 
     def test_local_save_does_not_write_device_or_change_running_connection(self):
         with mock.patch("tcp2com_gui.C5Client.save") as save_device:
@@ -321,6 +365,22 @@ class GUITests(unittest.TestCase):
         self.assertEqual(device.requests[-1]["patch"], {**patch, "ap_channel": 36, "revision": 23})
         self.assertEqual(device.save_count, 1)
         self.assertIsNone(self.gui.baseline)
+
+    def test_c5_reset_pin_usb_save_and_old_firmware_disabled(self):
+        self.read_fixture()
+        self.assertEqual(str(self.gui.c5_forms["common"].widgets["reset_pin"]["state"]), "disabled")
+        device = SerialC5()
+        device.config = wbr_config(link_mode=2, reset_pin=0)
+        self.connect_usb_fixture(device)
+        self.gui.read_c5()
+        wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        form = self.gui.c5_forms["common"]
+        self.assertNotEqual(str(form.widgets["reset_pin"]["state"]), "disabled")
+        form.set("reset_pin", 4)
+        with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True):
+            self.gui.save_c5()
+        wait_for(lambda: "已写入 NVS" in self.gui.c5_status.get(), self.root.update)
+        self.assertEqual(device.requests[-1]["patch"], {"reset_pin": 4, "revision": 23})
 
     def test_c5_wbr_gui_backup_import_and_draft_keep_network_without_session(self):
         device = SerialC5()

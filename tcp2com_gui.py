@@ -187,10 +187,10 @@ class BridgeGUI:
         self.start_button = ttk.Button(actions, text="启动", command=lambda: self.start("start"))
         self.stop_button = ttk.Button(actions, text="停止", command=self.stop)
         self.restart_button = ttk.Button(actions, text="应用参数并重启", command=lambda: self.start("restart"))
-        self.reset_button = ttk.Button(actions, text="ESP-01S 复位窗口", command=self.show_reset)
+        self.reset_button = ttk.Button(actions, text="远程复位", command=self.show_reset)
         for button in (self.start_button, self.stop_button, self.restart_button, self.reset_button):
             button.pack(side="left", padx=(0, 6))
-        for button in (self.stop_button, self.restart_button, self.reset_button):
+        for button in (self.stop_button, self.restart_button):
             button.configure(state="disabled")
         ttk.Label(actions, textvariable=self.applied).pack(side="right")
         usb_bar = ttk.Frame(outer)
@@ -358,6 +358,7 @@ class BridgeGUI:
         form = self.c5_forms["common"]
         form.note("新固件读取当前运行配置；临时应用值可能尚未保存。明确保存后写 NVS 并重启，业务连接会断开。")
         form.add("link_mode", "设备业务接口", 0, {"UART 原始透传": 0, "SPI WBR/1": 1, "UART WBR/1": 2})
+        form.add("reset_pin", "C5 外部复位线（仅串口模式）", 0, {"关闭": 0, "SCK GPIO23": 1, "MOSI GPIO10": 2, "MISO GPIO9": 3, "CS GPIO5": 4})
         form.add("mode", "设备 Wi-Fi 联网模式", 0, {"自建热点 AP": 0, "连接电脑热点": 1, "连接共享 Wi-Fi": 2})
         form.add("band", "频段", 0, {"2.4 GHz": 0, "5 GHz": 1, "自动（AP 使用 2.4 GHz）": 2})
         form.add("baud", "设备 UART 波特率（SPI 模式保留）", "1152000")
@@ -553,6 +554,8 @@ class BridgeGUI:
                     if draft is not None:
                         self._apply_device_draft(draft)
                         self.c5_status.set("已恢复上次编辑草稿；尚未读取设备，保存前请重新读取")
+        if self.reset_panel and not self.reset_panel.closed:
+            self.reset_panel.set_context(device, self.controller.snapshot()[0], self.network.get("host"))
         self.setup_hint.set(caps.setup_hint if caps.usb else "ESP-01S 使用原有透传与复位功能。")
         self.tabs.tab(self.c5_frame, text=f"{caps.label} 用户配置" if caps.usb else "设备用户配置")
         self.c5_buttons[1].configure(text=f"读取 {caps.label}")
@@ -597,7 +600,7 @@ class BridgeGUI:
         self.network.widgets["device"].configure(state="disabled" if self.http_busy else "readonly")
         self.draft_button.configure(state="normal" if enabled and self.network.get("device") in self._device_drafts
                                     else "disabled")
-        for key in ("net_role","auto_reconnect","remote_ip","remote_port","local_port",
+        for key in ("reset_pin","net_role","auto_reconnect","remote_ip","remote_port","local_port",
                     "reconnect_ms","connect_timeout_ms","up_kb","down_kb"):
             self.c5_forms["common"].enable(key,enabled and self.baseline is not None and key in self.baseline)
         self._c5_changes()
@@ -641,7 +644,6 @@ class BridgeGUI:
             values = self.settings()
             values["usb_port"] = values["usb_log"] = None
             args = settings_to_args(values)
-            self._reset_shutdown()
             self.controller.submit(command, args)
         except ValueError as exc:
             self.error(exc)
@@ -650,7 +652,6 @@ class BridgeGUI:
         if self.http_busy:
             self.error("配置请求正在进行，请等待完成后再停止 USB")
             return
-        self._reset_shutdown()
         self.controller.submit("stop")
 
     def apply_usb(self):
@@ -717,10 +718,12 @@ class BridgeGUI:
 
     def show_reset(self):
         app = self.controller.snapshot()[0]
-        if app and not app.args.no_reset_ui:
-            if not self.reset_panel or self.reset_panel.closed:
-                self.reset_panel = ResetPanel(app, self.root)
-            self.reset_panel.show()
+        device = self.network.get("device")
+        if not self.reset_panel or self.reset_panel.closed:
+            self.reset_panel = ResetPanel(app, self.root, device=device, host=self.network.get("host"))
+        else:
+            self.reset_panel.set_context(device, app, self.network.get("host"))
+        self.reset_panel.show()
 
     def open_web(self):
         try:
@@ -775,6 +778,8 @@ class BridgeGUI:
 
     def edited_c5(self):
         result = self.c5_forms["common"].values()
+        if self.network.get("device") != "c5" or not self.baseline or "reset_pin" not in self.baseline:
+            result.pop("reset_pin", None)
         for key in ("baud", "tcp_port", "remote_port", "local_port", "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb"):
             try:
                 result[key] = int(result[key])
@@ -789,7 +794,7 @@ class BridgeGUI:
             result[name] = {key: value for key, value in self.c5_forms[name].values().items()
                             if key not in ("password", "clear_password")}
         if self.baseline is not None:
-            for key in ("net_role","auto_reconnect","remote_ip","remote_port","local_port",
+            for key in ("reset_pin","net_role","auto_reconnect","remote_ip","remote_port","local_port",
                         "reconnect_ms","connect_timeout_ms","up_kb","down_kb"):
                 if key not in self.baseline:
                     result.pop(key,None)
@@ -951,13 +956,13 @@ class BridgeGUI:
             self.usb_master_status.set(f"USB：{state_text} · {usb.port}")
         else:
             self.usb_master_status.set("USB：已关闭")
-        if self.reset_panel and (not app or self.reset_panel.app is not app):
-            self._reset_shutdown()
+        if self.reset_panel and not self.reset_panel.closed:
+            self.reset_panel.set_context(self.network.get("device"), app, self.network.get("host"))
         self.status.set(state)
         self.start_button.configure(state="normal" if not busy and not self.http_busy and not app else "disabled")
         self.stop_button.configure(state="normal" if not busy and not self.http_busy and (app or usb) else "disabled")
         self.restart_button.configure(state="normal" if not busy and not self.http_busy and app else "disabled")
-        self.reset_button.configure(state="normal" if app and not busy and not app.args.no_reset_ui else "disabled")
+        self.reset_button.configure(state="disabled" if self.closing else "normal")
         try:
             values = self.settings()
             values["usb_port"] = values["usb_log"] = None
