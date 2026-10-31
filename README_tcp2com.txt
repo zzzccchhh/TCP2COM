@@ -1,6 +1,9 @@
 tcp2com ESP-01S / ESP32-C5 / ESP32-S3 协议与操作说明
 
 当前通用功能、ESP32-C5/S3 TCP 服务端/UDP、JSON 配置和 USB 诊断请先阅读 readme.md。
+新版暖灰三栏桌面工作台：启动_新版界面.vbs，只显示主界面；原 BAT 保留用于首次构建和诊断。
+启动异常会弹窗提示，日志默认在 %LOCALAPPDATA%\WiFiBridge\logs\startup.log。首次安装见 readme.md。
+新版为 React + pywebview 本地界面，支持日志、流量监测、USB、设备配置和远程复位；旧 GUI/CLI 保留。
 中文图形界面双击“启动_图形界面.bat”；支持 C5/S3 用户配置读取、修改、保存并重启。
 S3 选择 s3-client 并加载，或双击“启动_S3.bat”；默认连接 192.168.4.1:8080，使用前修改业务 COM。
 S3 原生 USB 为 GPIO19/20，配网按键 GPIO4，长按至少 3 秒后松开；仅支持 2.4 GHz。

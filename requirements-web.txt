@@ -1,0 +1,2 @@
+-r requirements-tcp2com.txt
+pywebview>=6.0,<7
