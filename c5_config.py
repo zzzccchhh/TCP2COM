@@ -37,7 +37,7 @@ def public_config(document, device="c5"):
             result[name] = {key: copy.deepcopy(document[name][key]) for key in STATION_FIELDS}
     except (KeyError, TypeError) as exc:
         raise ConfigError("配置缺少必要字段，请检查固件版本") from exc
-    if device == "c5" and "reset_pin" in document:
+    if device in ("c5", "s3") and "reset_pin" in document:
         result["reset_pin"] = copy.deepcopy(document["reset_pin"])
     for key in NETWORK_FIELDS:
         if key in document:
@@ -105,7 +105,7 @@ def validate_config(config, device="c5"):
                            ("baud", 9600, 5000000), ("tcp_port", 1024, 65535), ("ap_channel", 1, 165)):
         if type(config.get(key)) is not int or not low <= config[key] <= high:
             raise ConfigError(f"{key} 必须为 {low}～{high} 的整数")
-    if "reset_pin" in config and (device != "c5" or type(config["reset_pin"]) is not int or not 0 <= config["reset_pin"] <= 4):
+    if "reset_pin" in config and (device not in ("c5", "s3") or type(config["reset_pin"]) is not int or not 0 <= config["reset_pin"] <= 4):
         raise ConfigError("复位线必须为 0～4")
     if config.get("reset_pin", 0) and config["link_mode"] != 1 and (
             (config.get("net_role", 0) == 0 and config["tcp_port"] == 8081) or
@@ -168,6 +168,8 @@ def changed_config(baseline, edited, passwords=None, clear_passwords=(), device=
         else:
             candidate[name]["password"] = value
     validate_config(candidate, device)
+    if device == "s3" and candidate["link_mode"] == 0 and base["link_mode"] != 0 and "reset_pin" not in base:
+        raise ConfigError("无法确认旧版 S3 固件支持原始串口，请更新固件并重新读取")
     patch = {key: candidate[key] for key in TOP_FIELDS + NETWORK_FIELDS + ("reset_pin",)
              if key in candidate and candidate[key] != base.get(key)}
     if "ap_password" in candidate:
@@ -190,6 +192,10 @@ def validate_patch(patch, device, baseline=None):
             type(patch["ap_channel"]) is not int or not 1 <= patch["ap_channel"] <= 13):
         raise ConfigError("S3 的 2.4 GHz 信道必须为 1～13")
     if baseline is not None:
+        if "reset_pin" in patch and "reset_pin" not in baseline:
+            raise ConfigError("设备未报告复位配置，请更新固件后重新读取")
+        if device == "s3" and patch.get("link_mode") == 0 and "reset_pin" not in baseline:
+            raise ConfigError("无法确认旧版 S3 固件支持原始串口，请更新固件并重新读取")
         merged = copy.deepcopy(baseline)
         for key, value in patch.items():
             if key in ("pc", "shared"):

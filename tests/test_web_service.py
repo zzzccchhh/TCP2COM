@@ -202,7 +202,7 @@ class WebServiceTests(unittest.TestCase):
             self.service._reset_thread.join(2)
             reset.assert_called_once()
         self.settings(device="s3")
-        self.assertFalse(self.service.reset_click("127.0.0.1")["ok"])
+        self.assertEqual(self.ok(self.service.reset_click("127.0.0.1"))["count"], 1)
 
 
 class WebHTTPTests(unittest.TestCase):

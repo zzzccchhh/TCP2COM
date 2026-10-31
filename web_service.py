@@ -46,7 +46,7 @@ def default_device_config(device):
               "auto_reconnect": True, "remote_ip": "192.168.137.1", "remote_port": 8080,
               "local_port": 6060, "reconnect_ms": 1000, "connect_timeout_ms": 10000,
               "up_kb": 4096, "down_kb": 1024, "pc": copy.deepcopy(station), "shared": copy.deepcopy(station)}
-    if device == "c5":
+    if device in ("c5", "s3"):
         result["reset_pin"] = 0
     return result
 
@@ -500,8 +500,6 @@ class WebService:
             app = self._controller.snapshot()[0]
             if self._gate.busy:
                 raise ValueError("复位请求进行中")
-            if device == "s3":
-                raise ValueError("当前 S3 固件不支持远程复位")
             if device == "esp01s":
                 if not app or app.args.device != "esp01s" or app.args.no_reset_ui or app.close_event.is_set():
                     raise ValueError("请启动 ESP-01S TCP 客户端桥接并启用复位入口")

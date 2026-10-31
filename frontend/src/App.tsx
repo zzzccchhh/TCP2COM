@@ -361,11 +361,11 @@ export default function App() {
                         <div className="device-facts"><div><span>业务接口</span><strong>{snap.baseline ? ['UART 透传', 'SPI WBR/1', 'UART WBR/1'][snap.baseline.link_mode] : '—'}</strong></div><div><span>联网模式</span><strong>{snap.baseline ? ['自建热点 AP', '电脑热点 STA', '共享 Wi-Fi STA'][snap.baseline.mode] : '—'}</strong></div></div>
                         <button className="button secondary full" disabled={waiting} onClick={() => run(readConfig)}>{working ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}读取设备配置</button>
                         <button className="button full" onClick={() => setDrawer('config')}><SlidersHorizontal size={14} />打开配置面板<ArrowRight size={14} /></button>
-                        <p className="setup-note"><Info size={12} /><span>配网：GPIO{device === 'c5' ? '24' : '4'} 长按 3 秒后松开。</span></p>
+                        <p className="setup-note"><Info size={12} /><span>配网：GPIO{device === 'c5' ? '24' : '4'} 长按 3 秒进入配网。</span></p>
                     </> : <p className="setup-note">ESP-01S 保留透传和远程复位功能。</p>}
                 </section>
 
-                <section className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><button className="icon-button" disabled={device === 's3'} title={device === 's3' ? '当前 S3 固件不支持远程复位' : '打开远程复位'} aria-label="打开远程复位" onClick={() => { setResetHost(settings.host || ''); setDrawer('reset'); }}><ArrowUpRight size={18} /></button></section>
+                <section className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><button className="icon-button" title="打开远程复位" aria-label="打开远程复位" onClick={() => { setResetHost(settings.host || ''); setDrawer('reset'); }}><ArrowUpRight size={18} /></button></section>
             </aside>
         </main>
 
@@ -391,7 +391,7 @@ export default function App() {
                         <div className="config-section"><h3>业务接口</h3><div className="form-grid">
                             {cf('link_mode', 'MCU 接口', { numeric: true, options: [[0, 'UART 原始透传'], [1, 'SPI WBR/1'], [2, 'UART WBR/1']] })}
                             {cf('baud', '设备 UART 波特率 / bps', { numeric: true })}
-                            {device === 'c5' && cf('reset_pin', '外部主控复位线', { numeric: true, options: [[0, '关闭'], [1, 'SCK / GPIO23'], [2, 'MOSI / GPIO10'], [3, 'MISO / GPIO9'], [4, 'CS / GPIO5']] })}
+                            {device !== 'esp01s' && cf('reset_pin', '外部主控复位线', { numeric: true, options: [[0, '关闭'], [1, `SCK / GPIO${device === 's3' ? 18 : 23}`], [2, 'MOSI / GPIO10'], [3, 'MISO / GPIO9'], [4, 'CS / GPIO5']] })}
                         </div></div>
                         <div className="config-section"><h3>Wi-Fi 与网络</h3><div className="form-grid">
                             {cf('mode', '设备联网模式', { numeric: true, options: [[0, '自建热点 AP'], [1, '连接电脑热点'], [2, '连接共享 Wi-Fi']] })}
@@ -430,9 +430,9 @@ export default function App() {
                         <h3>固件诊断字段</h3><div className={`notice ${usbStale ? 'warning' : ''}`}><Info size={15} /><span>{!snap.usb ? 'USB 未连接' : !usbOnline ? 'USB 离线 / 重试中，旧数值不代表设备在线' : snap.usb.age == null ? '尚未收到 stats' : `stats ${snap.usb.age.toFixed(1)} 秒前更新${usbStale ? '（已过期）' : ''}`}</span></div>
                         <dl className="diagnostic-list">{Object.entries(snap.usb?.fields || {}).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl></>}
                 </>}
-                {drawer === 'reset' && <><div className="notice"><Zap size={16} /><span>在 3 秒内连续点击 5 次触发复位。请求只发送一次，结果不明时检查主控状态。</span></div>{device === 'c5' && <div className="form-stack"><Field label="C5 IPv4 地址" value={resetHost} disabled={snap.reset.busy} onChange={setResetHost} /><Field label="控制端口" value={resetPort} disabled={snap.reset.busy} onChange={setResetPort} /></div>}
+                {drawer === 'reset' && <><div className="notice"><Zap size={16} /><span>在 3 秒内连续点击 5 次触发复位。请求只发送一次，结果不明时检查主控状态。</span></div>{device !== 'esp01s' && <div className="form-stack"><Field label="设备 IPv4 地址" value={resetHost} disabled={snap.reset.busy} onChange={setResetHost} /><Field label="控制端口" value={resetPort} disabled={snap.reset.busy} onChange={setResetPort} /></div>}
                     <div className="reset-progress">{Array.from({ length: 5 }, (_, i) => <i key={i} className={i < snap.reset.count ? 'filled' : ''} />)}</div>
-                    <button className="button primary full" disabled={snap.reset.busy || device === 's3'} onClick={() => run(() => call('reset_click', resetHost, resetPort))}><Zap size={15} />{snap.reset.busy ? '复位请求进行中…' : `复位外部主控 · ${snap.reset.count}/5`}</button><p className="small-copy">{snap.reset.message}</p>
+                    <button className="button primary full" disabled={snap.reset.busy} onClick={() => run(() => call('reset_click', resetHost, resetPort))}><Zap size={15} />{snap.reset.busy ? '复位请求进行中…' : `复位外部主控 · ${snap.reset.count}/5`}</button><p className="small-copy">{snap.reset.message}</p>
                 </>}
                 {drawer === 'help' && <><div className="help-step"><span>01</span><div><h3>选择设备与连接角色</h3><p>TCP 客户端主动连接设备；TCP 服务端等待设备连接；UDP 使用固定对端。</p></div></div><div className="help-step"><span>02</span><div><h3>设置业务 COM，启动桥接</h3><p>程序打开已有串口。需要虚拟串口时，请先创建串口对。电脑本地波特率不会修改设备 UART。</p></div></div><div className="help-step"><span>03</span><div><h3>按需连接 USB</h3><p>C5/S3 的 USB 用于日志和配置，可独立运行。使用 ESP-IDF monitor 前先断开 USB，等待释放端口。</p></div></div><div className="help-step"><span>04</span><div><h3>读取、编辑、明确保存</h3><p>进入配网后读取当前设备，再编辑并保存。保存会写入 NVS 并重启；保存结果不明时先重新读取核对。</p></div></div><div className="notice"><Info size={16} /><span>关闭主窗口会停止桥接并释放串口。最小化窗口继续转发。停止按钮同时关闭业务桥接与 USB。</span></div></>}
             </div>

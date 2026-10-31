@@ -250,7 +250,7 @@ class GUITests(unittest.TestCase):
             panel.worker.join(2)
             wait_for(lambda: not panel.gate.busy, self.root.update)
             self.assertIn("ESP32-C5", panel.status.get())
-            self.assertEqual(str(panel.button["state"]), "disabled")
+            self.assertEqual(str(panel.button["state"]), "normal")
             self.gui.network.set("device", "esp01s")
             self.root.update()
             self.assertIn("请启动", panel.bridge_state.get())
@@ -365,6 +365,21 @@ class GUITests(unittest.TestCase):
         self.assertEqual(device.requests[-1]["patch"], {**patch, "ap_channel": 36, "revision": 23})
         self.assertEqual(device.save_count, 1)
         self.assertIsNone(self.gui.baseline)
+
+    def test_s3_reset_pin_usb_save_and_mapping(self):
+        self.gui.network.set("device", "s3")
+        device = SerialC5(model="ESP32-S3", prefix=b"BRIDGECFG ")
+        device.config = wbr_config(device="s3", link_mode=2, reset_pin=0)
+        self.connect_usb_fixture(device)
+        self.gui.read_c5()
+        wait_for(lambda: self.gui.baseline is not None, self.root.update)
+        form = self.gui.c5_forms["common"]
+        self.assertIn("SCK GPIO18", form.options["reset_pin"])
+        form.set("reset_pin", 1)
+        with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True):
+            self.gui.save_c5()
+        wait_for(lambda: "已写入 NVS" in self.gui.c5_status.get(), self.root.update)
+        self.assertEqual(device.requests[-1]["patch"], {"reset_pin": 1, "revision": 23})
 
     def test_c5_reset_pin_usb_save_and_old_firmware_disabled(self):
         self.read_fixture()

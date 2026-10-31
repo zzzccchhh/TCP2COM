@@ -15,7 +15,7 @@ class DeviceCapabilities:
 
     @property
     def setup_hint(self):
-        return (f"长按 GPIO{self.setup_button} ≥3 秒后松开进入配网；"
+        return (f"长按 GPIO{self.setup_button} ≥3 秒进入配网；"
                 f"HTTP：连接 {self.setup_ssid}。USB：使用原生 USB，无需连接 Wi-Fi 或启动桥接。")
 
 

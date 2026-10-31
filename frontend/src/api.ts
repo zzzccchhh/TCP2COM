@@ -23,7 +23,7 @@ export function deviceDefaults(device: string): Data {
         ap_channel: 1, ap_ssid: `ESP32-${device.toUpperCase()}-Bridge`, ap_ip: '192.168.4.1',
         ap_gateway: '192.168.4.1', ap_netmask: '255.255.255.0', net_role: 0, auto_reconnect: true,
         remote_ip: '192.168.137.1', remote_port: 8080, local_port: 6060, reconnect_ms: 1000,
-        connect_timeout_ms: 10000, up_kb: 4096, down_kb: 1024, ...(device === 'c5' ? { reset_pin: 0 } : {}),
+        connect_timeout_ms: 10000, up_kb: 4096, down_kb: 1024, ...(device !== 'esp01s' ? { reset_pin: 0 } : {}),
         pc: { ...station }, shared: { ...station },
     };
 }

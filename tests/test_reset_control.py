@@ -30,7 +30,7 @@ class ClickTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.TestCase):
-    def exchange(self, handler, timeout=1, cancel=None):
+    def exchange(self, handler, timeout=1, cancel=None, device="esp01s"):
         received = []
         errors = []
         listener = socket.socket()
@@ -53,7 +53,7 @@ class ProtocolTests(unittest.TestCase):
         progress = []
         try:
             perform_reset("127.0.0.1", port, progress.append,
-                          cancel or threading.Event(), timeout)
+                          cancel or threading.Event(), timeout, device=device)
         finally:
             worker.join(3)
             self.assertFalse(worker.is_alive())
@@ -92,6 +92,17 @@ class ProtocolTests(unittest.TestCase):
         received, progress = self.exchange(handler)
         self.assertEqual(len(received), 1)
         self.assertRegex(received[0].decode(), r"^RESET [0-9a-f]{32}\n$")
+        self.assertEqual(len(progress), 1)
+
+    def test_s3_handshake_and_single_request(self):
+        def handler(conn, received):
+            conn.sendall(b"S3-RESET/1 READY\n")
+            line = conn.recv(80)
+            received.append(line)
+            request_id = line.decode().strip().split()[1]
+            conn.sendall(f"STARTED {request_id}\nDONE {request_id}\n".encode())
+        received, progress = self.exchange(handler, device="s3")
+        self.assertEqual(len(received), 1)
         self.assertEqual(len(progress), 1)
 
     def test_duplicate_already_complete(self):

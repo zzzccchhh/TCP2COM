@@ -77,7 +77,7 @@ def perform_reset(host, port, progress, cancel, timeout=5.0, *, device="esp01s")
                     pending.extend(data)
 
             # 先验证固件协议，旧固件/错误端口不会收到 RESET 命令。
-            greeting = "C5-RESET/1 READY" if device == "c5" else "ESP01S-RESET/1 READY"
+            greeting = {"c5": "C5-RESET/1 READY", "s3": "S3-RESET/1 READY", "esp01s": "ESP01S-RESET/1 READY"}[device]
             if read_line() != greeting:
                 raise ResetError("控制协议不匹配，请检查固件和控制端口")
             if cancel.is_set():
@@ -90,7 +90,7 @@ def perform_reset(host, port, progress, cancel, timeout=5.0, *, device="esp01s")
                 attempted = False
                 raise ResetError("ESP 正在执行其他复位，本次未执行")
             if response == f"STARTED {request_id}":
-                progress("C5 已开始复位：所选引脚拉低，数据灯快速呼吸" if device == "c5" else "ESP 已开始复位：GPIO0 拉低，GPIO2 快闪")
+                progress("设备已开始复位：所选引脚拉低，数据灯快速呼吸" if device in ("c5", "s3") else "ESP 已开始复位：GPIO0 拉低，GPIO2 快闪")
                 response = read_line()
             if response != f"DONE {request_id}":
                 raise ResetError("控制响应无效或请求编号不匹配")
@@ -179,7 +179,7 @@ class ResetPanel:
         tk.Label(self.root, textvariable=self.device_text, font=("Microsoft YaHei UI", 11)).pack(pady=(14, 6))
         tk.Label(self.root, textvariable=self.bridge_state).pack()
         self.address_frame = tk.Frame(self.root)
-        tk.Label(self.address_frame, text="C5 设备 IPv4 地址").pack(side="left")
+        tk.Label(self.address_frame, text="设备 IPv4 地址").pack(side="left")
         tk.Entry(self.address_frame, textvariable=self.host, width=18).pack(side="left", padx=5)
         tk.Label(self.address_frame, text="控制端口").pack(side="left")
         tk.Entry(self.address_frame, textvariable=self.port, width=7).pack(side="left", padx=5)
@@ -218,11 +218,11 @@ class ResetPanel:
         if target_changed and not self.gate.busy:
             self.gate.finish()
             self.status.set("等待操作（0/5）")
-        if changed and device == "c5" and not self.host.get():
+        if changed and device in ("c5", "s3") and not self.host.get():
             self.host.set(host)
         labels = {"c5": "ESP32-C5", "esp01s": "ESP-01S", "s3": "ESP32-S3"}
         self.device_text.set(f"当前设备：{labels.get(device, device)} · 外部主控复位")
-        if device == "c5":
+        if device in ("c5", "s3"):
             self.address_frame.pack(before=self.button, padx=12, pady=5)
             self.hint.set("3 秒内点击 5 次 · 所选引脚开漏拉低约 1 秒")
         else:
@@ -232,7 +232,7 @@ class ResetPanel:
         self._refresh_state()
 
     def _available(self):
-        if self.device == "c5":
+        if self.device in ("c5", "s3"):
             return True
         return (self.device == "esp01s" and self.app is not None and
                 not self.app.close_event.is_set() and not getattr(self.app.args, "no_reset_ui", False) and
@@ -241,7 +241,7 @@ class ResetPanel:
     def _refresh_state(self):
         if self.gate.busy:
             self.bridge_state.set(f"{self.active_device} 复位请求进行中；完成前不能再次触发")
-        elif self.device == "c5":
+        elif self.device in ("c5", "s3"):
             self.bridge_state.set("控制连接独立于业务桥接")
         elif self.device == "esp01s" and self._available():
             sock, _ = self.app.conn.snapshot()
@@ -263,20 +263,20 @@ class ResetPanel:
         if not self.gate.click(time.monotonic()):
             self._set_status(f"已点击 {self.gate.count}/5（从首次点击起 3 秒内完成）")
             return
-        if self.device == "c5":
+        if self.device in ("c5", "s3"):
             try:
                 import ipaddress
                 host = str(ipaddress.IPv4Address(self.host.get().strip()))
                 port = int(self.port.get())
                 if not 1 <= port <= 65535: raise ValueError()
             except ValueError:
-                self.gate.finish(); self._set_status("请输入有效的 C5 IPv4 地址和端口")
+                self.gate.finish(); self._set_status("请输入有效的设备 IPv4 地址和端口")
                 self._refresh_state()
                 return
         else:
             host, port = self.app.args.host, self.app.args.control_port
         device = self.device
-        self.active_device = "ESP32-C5" if device == "c5" else "ESP-01S"
+        self.active_device = {"c5": "ESP32-C5", "s3": "ESP32-S3", "esp01s": "ESP-01S"}[device]
         notify = getattr(getattr(self.app, "ui", None), "message", lambda _: None)
         self._refresh_state()
         self._set_status(f"正在向 {self.active_device} 发送复位请求…")
@@ -292,11 +292,11 @@ class ResetPanel:
                 perform_reset(host, port, lambda text: events.put((False, text)), cancel)
                 message = "复位完成：GPIO0 已释放，恢复正常状态灯"
             else:
-                perform_reset(host, port, lambda text: events.put((False, text)), cancel, device="c5")
+                perform_reset(host, port, lambda text: events.put((False, text)), cancel, device=device)
                 message = "复位输出已释放；请检查主控状态"
         except ResetError as exc:
             message = str(exc)
-        message = f"{'ESP32-C5' if device == 'c5' else 'ESP-01S'}：{message}"
+        message = f"{ {'c5': 'ESP32-C5', 's3': 'ESP32-S3', 'esp01s': 'ESP-01S'}[device]}：{message}"
         notify(message)
         events.put((True, message))
 

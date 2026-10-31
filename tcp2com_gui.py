@@ -358,7 +358,7 @@ class BridgeGUI:
         form = self.c5_forms["common"]
         form.note("新固件读取当前运行配置；临时应用值可能尚未保存。明确保存后写 NVS 并重启，业务连接会断开。")
         form.add("link_mode", "设备业务接口", 0, {"UART 原始透传": 0, "SPI WBR/1": 1, "UART WBR/1": 2})
-        form.add("reset_pin", "C5 外部复位线（仅串口模式）", 0, {"关闭": 0, "SCK GPIO23": 1, "MOSI GPIO10": 2, "MISO GPIO9": 3, "CS GPIO5": 4})
+        form.add("reset_pin", "外部复位线（仅串口模式）", 0, {"关闭": 0, "SCK GPIO23": 1, "MOSI GPIO10": 2, "MISO GPIO9": 3, "CS GPIO5": 4})
         form.add("mode", "设备 Wi-Fi 联网模式", 0, {"自建热点 AP": 0, "连接电脑热点": 1, "连接共享 Wi-Fi": 2})
         form.add("band", "频段", 0, {"2.4 GHz": 0, "5 GHz": 1, "自动（AP 使用 2.4 GHz）": 2})
         form.add("baud", "设备 UART 波特率（SPI 模式保留）", "1152000")
@@ -554,6 +554,12 @@ class BridgeGUI:
                     if draft is not None:
                         self._apply_device_draft(draft)
                         self.c5_status.set("已恢复上次编辑草稿；尚未读取设备，保存前请重新读取")
+        reset_form = self.c5_forms["common"]
+        reset_value = reset_form.get("reset_pin")
+        reset_form.options["reset_pin"] = {"关闭": 0, f"SCK GPIO{18 if device == 's3' else 23}": 1, "MOSI GPIO10": 2, "MISO GPIO9": 3, "CS GPIO5": 4}
+        reset_form.widgets["reset_pin"].configure(values=list(reset_form.options["reset_pin"]))
+        with self._pause_device():
+            reset_form.set("reset_pin", reset_value)
         if self.reset_panel and not self.reset_panel.closed:
             self.reset_panel.set_context(device, self.controller.snapshot()[0], self.network.get("host"))
         self.setup_hint.set(caps.setup_hint if caps.usb else "ESP-01S 使用原有透传与复位功能。")
@@ -778,7 +784,7 @@ class BridgeGUI:
 
     def edited_c5(self):
         result = self.c5_forms["common"].values()
-        if self.network.get("device") != "c5" or not self.baseline or "reset_pin" not in self.baseline:
+        if self.network.get("device") not in ("c5", "s3") or not self.baseline or "reset_pin" not in self.baseline:
             result.pop("reset_pin", None)
         for key in ("baud", "tcp_port", "remote_port", "local_port", "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb"):
             try:

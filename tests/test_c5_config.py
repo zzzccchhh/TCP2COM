@@ -71,6 +71,22 @@ class ConfigModelTests(unittest.TestCase):
             with self.subTest(password=password), self.assertRaises(ConfigError):
                 changed_config(base, base, {"pc": password})
 
+    def test_s3_reset_configuration_and_legacy_field_absence(self):
+        base = wbr_config(device="s3", link_mode=2, reset_pin=0)
+        self.assertEqual(public_config(base, "s3")["reset_pin"], 0)
+        edited = copy.deepcopy(base)
+        edited["reset_pin"] = 1
+        self.assertEqual(changed_config(base, edited, device="s3"), {"reset_pin": 1})
+        edited["tcp_port"] = 8081
+        with self.assertRaises(ConfigError):
+            public_config(edited, "s3")
+        old = wbr_config(device="s3")
+        self.assertNotIn("reset_pin", public_config(old, "s3"))
+        edited_old = copy.deepcopy(old)
+        edited_old["link_mode"] = 0
+        with self.assertRaisesRegex(ConfigError, "旧版 S3"):
+            changed_config(old, edited_old, device="s3")
+
     def test_numeric_types_modes_and_channel_matching(self):
         base = example_config()
         for field, value in (("link_mode", 3), ("mode", True), ("band", 3), ("baud", 9599),
