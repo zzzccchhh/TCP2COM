@@ -30,7 +30,8 @@ button { color: inherit; }
 ::-webkit-scrollbar-thumb { background: #cfcec5; border-radius: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 .app-shell { max-width: 1720px; margin: 0 auto; padding: 0 40px; }
-.masthead { display: flex; height: 80px; align-items: center; justify-content: space-between; border-bottom: 1px solid #dcdbd3; }
+/* Keep header popovers together below drawer and confirmation backdrops. */
+.masthead { position: relative; z-index: 10; display: flex; height: 80px; align-items: center; justify-content: space-between; border-bottom: 1px solid #dcdbd3; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand-mark { display: grid; place-items: center; width: 42px; height: 42px; color: #f6f5ef; background: #272724; border-radius: 12px; }
 .brand strong { display: block; font-family: 'Segoe UI', sans-serif; font-weight: 650; font-size: 23px; letter-spacing: -.7px; line-height: 1.2; }

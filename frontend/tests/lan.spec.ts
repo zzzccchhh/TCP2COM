@@ -136,3 +136,38 @@ test('lost enrollment response retries the same enrollment instead of adding a s
     expect(identifiers).toHaveLength(2);
     expect(identifiers[0]).toBe(identifiers[1]);
 });
+
+for (const width of [1440, 390]) {
+    test(`drawers cover service status and connection popover at ${width}px`, async ({ page, request }) => {
+        await page.setViewportSize({ width, height: 1000 });
+        const links = await (await request.get(fixture)).json();
+        await page.goto(links.online);
+        await expect(page.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
+        for (const [button, title] of [
+            ['打开远程复位', '远程复位'], ['打开配置面板', '设备配置面板'],
+            ['查看链路诊断', '链路诊断'], ['使用帮助', '使用帮助'],
+        ]) {
+            await page.getByRole('button', { name: '局域网连接', exact: true }).click();
+            await page.getByRole('button', { name: button, exact: true }).click();
+            const dialog = page.getByRole('dialog', { name: title, exact: true });
+            await expect(dialog).toBeVisible();
+            await page.evaluate(() => window.scrollTo(0, 0));
+            // Test actual hit targets where the header content would otherwise obscure the drawer.
+            await expect.poll(() => page.evaluate(() => {
+                const backdrop = document.querySelector('.drawer-backdrop');
+                return ['.lan-connection-state', '.lan-panel'].every(selector => {
+                    const element = document.querySelector(selector)!;
+                    const rect = element.getBoundingClientRect();
+                    const x = Math.max(0, Math.min(innerWidth - 1, rect.left + rect.width / 2));
+                    const y = Math.max(0, Math.min(innerHeight - 1, rect.top + Math.min(rect.height / 2, 70)));
+                    return backdrop?.contains(document.elementFromPoint(x, y));
+                });
+            })).toBe(true);
+            if (title === '远程复位') await dialog.getByLabel('设备 IPv4 地址', { exact: true }).fill('192.168.4.1');
+            await page.screenshot({ path: `test-results/drawer-${width}-${title}.png`, animations: 'disabled' });
+            await dialog.getByRole('button', { name: '关闭面板', exact: true }).click();
+            await expect(dialog).not.toBeVisible();
+            await page.getByRole('button', { name: '局域网连接', exact: true }).click();
+        }
+    });
+}
