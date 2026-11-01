@@ -340,3 +340,10 @@ select { appearance: none; width: 100%; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+.lan-entry { position: relative; }
+.lan-panel { position: absolute; right: 0; top: 48px; z-index: 25; width: min(400px, calc(100vw - 32px)); padding: 22px; max-height: calc(100dvh - 120px); overflow: auto; box-shadow: 0 16px 60px #20251b30; }
+.lan-panel p { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.lan-panel form { display: grid; gap: 12px; }
+.lan-panel input { font-size: 16px; }
+.lan-panel li { font-size: 12px; overflow-wrap: anywhere; margin: 10px 0; }
+@media (max-width: 760px) { .lan-panel { position: fixed; top: 85px; right: 16px; } .lan-entry > .button { font-size: 11px; padding: 8px; } }

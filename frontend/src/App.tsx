@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { applyDraft, call, defaults, deviceDefaults, download, emptySnapshot, isTrafficActive, labels, size } from './api';
 import type { Data } from './api';
+import Pairing from './Pairing';
+import { isLAN } from './lan';
 
 type FieldProps = {
     label: string; value: any; onChange: (value: any) => void;
@@ -55,6 +57,7 @@ export default function App() {
     const settingsRef = useRef(settings);
     const pendingSettings = useRef<Promise<any>>(Promise.resolve());
     const settingsError = useRef('');
+    const pendingLAN = useRef(0);
     const pendingDraft = useRef<Promise<any>>(Promise.resolve());
     const [snap, setSnap] = useState<Data>(emptySnapshot);
     const [native, setNative] = useState(false);
@@ -108,6 +111,11 @@ export default function App() {
                     return;
                 }
                 setSnap(next);
+                if (isLAN() && next.settings && !pendingLAN.current) {
+                    if (next.settings.device !== settingsRef.current.device) setConfig(deviceDefaults(next.settings.device));
+                    settingsRef.current = { ...defaults, ...next.settings };
+                    setSettings(settingsRef.current);
+                }
                 if (next.epoch !== lastEpoch.current) {
                     setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); setConfirm(null);
                     lastEpoch.current = next.epoch;
@@ -121,11 +129,16 @@ export default function App() {
                 if (isTrafficActive(next, settingsRef.current.mode)) {
                     setSamples(previous => [...previous, next.rates].slice(-120));
                 }
-            } catch (error) { if (!stopped) notify(`界面连接异常：${String(error)}`); }
+            } catch (error) { if (!stopped) {
+                notify(`界面连接异常：${String(error)}`);
+                if (isLAN()) setSnap(previous => ({ ...previous, connected: false, running: false, state_status: '与局域网服务失去联系，请检查连接或重新配对' }));
+            } }
             if (!stopped) polling = setTimeout(poll, 250);
         }
         async function initialize() {
-            if (initialized || !window.pywebview?.api) return;
+            if ((initialized && !isLAN()) || !window.pywebview?.api) return;
+            clearTimeout(polling);
+            if (isLAN()) { cursor.current = 0; lastEpoch.current = 0; logGeneration.current = 0; setLogs([]); setSamples([]); }
             initialized = true;
             try {
                 const data = await call<Data>('initial');
@@ -184,14 +197,24 @@ export default function App() {
             const nextConfig = deviceDefaults(value);
             setConfig(draft ? applyDraft(nextConfig, draft, value) : nextConfig);
         }
-        if (native) pendingSettings.current = pendingSettings.current.then(async () => {
+        if (native) {
+            if (isLAN()) pendingLAN.current++;
+            pendingSettings.current = pendingSettings.current.then(async () => {
             try {
-                const result = await call('update_settings', next);
+                const result = await call('update_settings', isLAN() ? { [key]: value } : next);
                 if (typeof result?.epoch === 'number') lastEpoch.current = Math.max(lastEpoch.current, result.epoch);
                 settingsError.current = '';
             }
-            catch (error) { settingsError.current = String(error); notify(String(error)); }
+            catch (error) {
+                settingsError.current = String(error); notify(String(error));
+                if (isLAN()) {
+                    try { const data = await call<Data>('initial'); settingsRef.current = { ...defaults, ...data.settings }; setSettings(settingsRef.current); settingsError.current = ''; }
+                    catch { /* Keep error visible until connection is restored. */ }
+                }
+            }
+            finally { if (isLAN()) pendingLAN.current = Math.max(0, pendingLAN.current - 1); }
         });
+        }
     }
 
     async function run(action: () => Promise<any>) {
@@ -263,7 +286,7 @@ export default function App() {
     return <div className="app-shell">
         <header className="masthead">
             <div className="brand"><span className="brand-mark"><Wifi size={23} strokeWidth={1.7} /></span><div><strong>Wi-Fi Bridge<span className="brand-period">.</span></strong><small>WIRELESS SERIAL WORKSPACE</small></div></div>
-            <div className="header-right"><span className="local-indicator"><ShieldCheck size={14} />{native ? '本地运行' : '界面预览'}</span>
+            <div className="header-right"><Pairing /><span className="local-indicator"><ShieldCheck size={14} />{isLAN() ? '局域网已配对' : native ? '本地运行' : '界面预览'}</span>
                 <span className="header-divider" /><button className="icon-button" title="使用帮助" aria-label="使用帮助" onClick={() => setDrawer('help')}><CircleHelp size={19} /></button>
                 <span className="version">DESKTOP / 1.0</span></div>
         </header>
@@ -274,7 +297,7 @@ export default function App() {
             </select><ChevronDown size={14} /></div></div>
         </section>
 
-        {!native && ready && <div className="preview-banner"><Info size={14} /><span>浏览器界面预览 · 连接设备请运行桌面版「启动_新版界面.vbs」</span></div>}
+        {!native && ready && <div className="preview-banner"><Info size={14} /><span>浏览器界面预览 · 可通过右上角「局域网配对」连接服务，也可运行桌面版「启动_新版界面.vbs」</span></div>}
 
         <main className="workspace">
             <aside className="connection-column">
