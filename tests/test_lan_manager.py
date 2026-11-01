@@ -6,7 +6,9 @@ import unittest
 from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
-from lan_manager import Manager, ONLINE_URL, pairing_link, service_addresses, run_manager
+from lan_manager import Manager, ONLINE_URL, pairing_link, run_manager
+from lan_network import InterfaceAddress
+from lan_preferences import Preferences
 from lan_service import LANService, make_server
 from web_service import WebService
 
@@ -22,12 +24,6 @@ class SharingTests(unittest.TestCase):
         self.assertEqual(parse_qs(url.fragment), {'service': [address], 'invite': ['test-invitation']})
         self.assertTrue(pairing_link(address).startswith(ONLINE_URL))
         self.assertTrue(pairing_link(address, 'test-invitation', online=False).startswith(address))
-
-    def test_addresses_respect_bind_and_include_local_fallback(self):
-        self.assertEqual(service_addresses('127.0.0.1', 9000), ['http://127.0.0.1:9000/'])
-        self.assertEqual(service_addresses('192.168.1.9', 9000), ['http://192.168.1.9:9000/'])
-        with mock.patch('lan_manager.socket.getaddrinfo', return_value=[(None, None, None, None, ('192.168.1.9', 0))]):
-            self.assertEqual(service_addresses('0.0.0.0', 9000)[0], 'http://192.168.1.9:9000/')
 
     def test_closing_manager_stops_server_and_releases_service(self):
         try:
@@ -106,6 +102,33 @@ class ManagerTests(unittest.TestCase):
         previous = self.manager.online_link.get()
         self.manager.rotate_links()
         self.assertNotEqual(previous, self.manager.online_link.get())
+
+    def test_selected_card_survives_restart_new_ip_disconnect_and_recovery(self):
+        old = InterfaceAddress('windows:card-A', 'WLAN', '192.168.1.20')
+        new = InterfaceAddress('windows:card-A', 'WLAN', '192.168.1.80')
+        other = InterfaceAddress('windows:card-B', 'Ethernet', '192.168.1.10')
+        loop = InterfaceAddress('loopback', '本机专用', '127.0.0.1')
+        path = Path(self.temp.name) / 'lan.json'
+        self.manager.preferences = Preferences(path)
+        with mock.patch('lan_manager.discover_addresses', return_value=([other, old, loop], '')):
+            self.manager.scan_addresses()
+            self.manager.choice.set(old.label(self.server.server_port))
+            self.manager.address_selected()
+        self.assertEqual(Preferences(path).data['preferred_interface'], old.preference())
+        self.manager.preferences = Preferences(path)  # Simulate a fresh launch loading saved data.
+        with mock.patch('lan_manager.discover_addresses', return_value=([other, new, loop], '')):
+            self.manager.scan_addresses()
+        self.assertEqual(self.manager.address.get(), new.url(self.server.server_port))
+        self.assertIn('192.168.1.80', self.manager.link.get())
+        self.assertEqual(Preferences(path).data['preferred_interface'], new.preference())
+        with mock.patch('lan_manager.discover_addresses', return_value=([other, loop], '')):
+            self.manager.scan_addresses()
+        self.assertEqual(self.manager.address.get(), loop.url(self.server.server_port))
+        self.assertIn('暂不可用', self.manager.network_status.get())
+        self.assertEqual(Preferences(path).data['preferred_interface'], new.preference())
+        with mock.patch('lan_manager.discover_addresses', return_value=([new, other, loop], '')):
+            self.manager.scan_addresses()
+        self.assertEqual(self.manager.address.get(), new.url(self.server.server_port))
 
     def test_small_window_can_scroll_to_footer_and_revoke(self):
         self.root.geometry('860x600+3500+100')

@@ -3,12 +3,14 @@
 import base64
 import gc
 import io
-import socket
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 from urllib.parse import urlencode
 import webbrowser
+
+from lan_network import discover_addresses, choose_address
+from lan_preferences import Preferences
 
 ONLINE_URL = "https://zzzccchhh.github.io/TCP2COM/"
 
@@ -18,24 +20,13 @@ def pairing_link(address, invite="", online=True):
     return (ONLINE_URL if online else address.rstrip('/') + '/') + "#" + urlencode({"service": address, "invite": invite})
 
 
-def service_addresses(host, port):
-    if host == "0.0.0.0":
-        try:
-            addresses = sorted({row[4][0] for row in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
-                                if not row[4][0].startswith("127.")})
-        except OSError:
-            addresses = []
-        addresses.append("127.0.0.1")
-    else:
-        addresses = [host]
-    return [f"http://{address}:{port}/" for address in addresses]
-
-
 class Manager:
-    def __init__(self, root, server, adapter):
+    def __init__(self, root, server, adapter, preferences=None):
         import qrcode  # Installation errors are reported by the launcher.
         self.qrcode = qrcode
         self.root, self.server, self.adapter = root, server, adapter
+        self.preferences = preferences or getattr(server, "preferences", None) or Preferences()
+        self.interfaces = []
         self.closed = False
         self.previous = None
         self.online_link = tk.StringVar()
@@ -64,17 +55,20 @@ class Manager:
         ttk.Label(box, text="Wi-Fi Bridge · 服务管理", style="Title.TLabel").pack(anchor="w")
         self.status = tk.StringVar(value="服务运行中 · 等待网页申请配对")
         ttk.Label(box, textvariable=self.status).pack(anchor="w", pady=(6, 16))
-        self.notice = tk.StringVar(value="打开网页 / 复制网址 / 扫码均自动连接，无需请求或允许；不会自动启动串口或 USB。")
+        self.notice = tk.StringVar(value=getattr(server, "startup_warning", "") or "打开网页 / 复制网址 / 扫码均自动连接，无需请求或允许；不会自动启动串口或 USB。")
         self.address_row(box, "在线工作台", self.online_link)
-        addresses = service_addresses(*server.server_address)
         row = ttk.Frame(box)
         row.pack(fill="x", pady=6)
         ttk.Label(row, text="局域网地址", width=12).pack(side="left")
-        self.address = tk.StringVar(value=addresses[0])
-        self.selector = ttk.Combobox(row, textvariable=self.address, values=addresses, state="readonly", font=("Consolas", 11))
+        self.address = tk.StringVar()
+        self.choice = tk.StringVar()
+        self.selector = ttk.Combobox(row, textvariable=self.choice, state="readonly", font=("Microsoft YaHei UI", 10))
         self.selector.pack(side="left", fill="x", expand=True, padx=(0, 8))
         ttk.Button(row, text="复制地址", command=lambda: self.copy(self.link.get())).pack(side="left", padx=3)
         ttk.Button(row, text="本地工作台", command=lambda: webbrowser.open(self.link.get())).pack(side="left", padx=3)
+        ttk.Button(row, text="重新扫描", command=self.scan_addresses).pack(side="left", padx=3)
+        self.network_status = tk.StringVar()
+        ttk.Label(box, textvariable=self.network_status, wraplength=950).pack(anchor="w", pady=(0, 6))
         sharing = ttk.Frame(box)
         sharing.pack(fill="x", pady=8)
         self.qr = ttk.Label(sharing)
@@ -89,8 +83,9 @@ class Manager:
         buttons.pack(anchor="w")
         ttk.Button(buttons, text="复制扫码连接链接", command=lambda: self.copy(self.link.get())).pack(side="left")
         ttk.Button(buttons, text="刷新连接链接 / 二维码", command=self.rotate_links).pack(side="left", padx=8)
-        self.selector.bind("<<ComboboxSelected>>", lambda event: self.update_qr())
-        self.update_qr()
+        self.selector.bind("<<ComboboxSelected>>", self.address_selected)
+        self.scan_addresses()
+        self.root.after(5000, self.monitor_addresses)
         ttk.Label(box, textvariable=self.notice, wraplength=950).pack(anchor="w", pady=(3, 12))
         self.legacy_visible = tk.BooleanVar(value=False)
         ttk.Checkbutton(box, text="显示旧版网页的兼容审批（新链接无需审批）", variable=self.legacy_visible, command=self.toggle_legacy).pack(anchor="w", pady=6)
@@ -107,6 +102,37 @@ class Manager:
         ttk.Label(box, text="关闭窗口停止服务。重启后请重新打开连接链接；刷新链接不影响已连接终端。", wraplength=950).pack(anchor="w")
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.refresh()
+
+    def scan_addresses(self):
+        if self.closed:
+            return
+        self.interfaces, warning = discover_addresses(self.server.server_address[0])
+        port = self.server.server_port
+        self.selector.configure(values=[row.label(port) for row in self.interfaces])
+        preferred = self.preferences.data["preferred_interface"]
+        selected, selection_warning = choose_address(self.interfaces, preferred)
+        self.choice.set(selected.label(port))
+        changed = self.address.get() != selected.url(port)
+        self.address.set(selected.url(port))
+        if not warning and (not preferred or selected.id == preferred["id"]) and selected.preference() != preferred:
+            self.preferences.update(preferred_interface=selected.preference())
+        self.network_status.set(" · ".join(filter(None, [warning, selection_warning, self.preferences.warning,
+                                                       f"当前网卡：{selected.name} · {selected.ip}"])))
+        if changed:
+            self.update_qr()
+
+    def address_selected(self, event=None):
+        selected = next((row for row in self.interfaces if row.label(self.server.server_port) == self.choice.get()), None)
+        if selected:
+            self.preferences.update(preferred_interface=selected.preference())
+            self.address.set(selected.url(self.server.server_port))
+            self.network_status.set(self.preferences.warning or f"已记住首选网卡：{selected.name} · {selected.ip}")
+            self.update_qr()
+
+    def monitor_addresses(self):
+        if not self.closed:
+            self.scan_addresses()
+            self.root.after(5000, self.monitor_addresses)
 
     def address_row(self, parent, title, value):
         row = ttk.Frame(parent)

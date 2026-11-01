@@ -350,4 +350,8 @@ select { appearance: none; width: 100%; }
 .lan-panel input { font-size: 16px; }
 .lan-panel li { font-size: 12px; overflow-wrap: anywhere; margin: 10px 0; }
 @media (max-width: 760px) { .lan-panel { position: fixed; top: 85px; right: 16px; } .lan-entry > .button { font-size: 11px; padding: 8px; } }
-@media (max-width: 760px) { .lan-connection-state { position: fixed; top: 67px; right: 16px; max-width: calc(100vw - 32px); } }
+@media (max-width: 760px) {
+    .masthead { position: relative; }
+    .lan-entry { position: static; }
+    .lan-connection-state { position: absolute; top: 67px; right: 0; max-width: calc(100vw - 32px); }
+}

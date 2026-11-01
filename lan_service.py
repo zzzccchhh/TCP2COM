@@ -7,12 +7,12 @@ import ipaddress
 import json
 from pathlib import Path
 import secrets
-import socket
 import threading
 import time
 from urllib.parse import urlsplit, unquote
 
 from web_service import WebService
+from lan_preferences import DEFAULT_PATH, Preferences, startup_settings
 
 BASE = Path(__file__).resolve().parent
 METHODS = frozenset("initial ports poll update_settings bridge usb remember_draft read_device preview_save save_device import_config backup_config clear_logs export_logs reset_click peers revoke".split())
@@ -309,18 +309,35 @@ def make_server(host, port, adapter, dist=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Wi-Fi Bridge 局域网多端服务")
-    parser.add_argument("--listen", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--origin", action="append", default=["https://zzzccchhh.github.io"])
+    parser.add_argument("--listen", help="监听 IPv4 地址；未指定时恢复上次设置")
+    parser.add_argument("--port", type=int, help="监听端口；未指定时恢复上次设置")
+    parser.add_argument("--origin", action="append", help="允许的网页来源；未指定时恢复上次设置")
     parser.add_argument("--headless", action="store_true", help="只运行服务，不显示管理窗口")
     args = parser.parse_args()
     if not (BASE / "frontend" / "dist" / "index.html").is_file():
         raise ValueError("本地网页尚未构建。请在 frontend 目录运行 npm ci 和 npm run build，再启动局域网服务。")
-    adapter = LANService(origins=args.origin)
-    server = make_server(args.listen, args.port, adapter)
-    print(f"本机页面：http://127.0.0.1:{args.port}/", flush=True)
-    for address in sorted({x[4][0] for x in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)}):
-        print(f"局域网页面：http://{address}:{args.port}/", flush=True)
+    preferences = Preferences(DEFAULT_PATH)
+    startup_warning = preferences.warning
+    settings = startup_settings(preferences.data, args.listen, args.port, args.origin)
+    adapter = LANService(origins=settings["origins"])
+    try:
+        server = make_server(settings["listen"], settings["port"], adapter)
+    except OSError:
+        adapter.service._shutdown()
+        raise
+    server.preferences = preferences
+    server.startup_warning = startup_warning
+    if preferences.warning:
+        print(preferences.warning, flush=True)
+    preferences.update(listen=settings["listen"], port=settings["port"], origins=settings["origins"])
+    if preferences.warning:
+        print(preferences.warning, flush=True)
+    from lan_network import discover_addresses
+    addresses, warning = discover_addresses(server.server_address[0])
+    if warning:
+        print(warning, flush=True)
+    for address in addresses:
+        print(f"{address.name}：{address.url(server.server_port)}", flush=True)
     print("在线工作台：https://zzzccchhh.github.io/TCP2COM/\n使用服务管理窗口的打开网页、复制网址或二维码即可自动连接。", flush=True)
     try:
         if args.headless:

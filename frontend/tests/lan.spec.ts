@@ -17,6 +17,15 @@ test('online links auto connect desktop and mobile, synchronize and revoke witho
             expect(new URL(page.url()).hash).toBe('');
             await expect(page.getByRole('button', { name: '启动桥接', exact: true })).toBeVisible();
             await expect(page.getByRole('button', { name: '连接 USB', exact: true })).toBeVisible();
+            const notice = page.getByRole('status', { name: '服务连接状态', exact: true });
+            const before = await notice.evaluate(node => node.getBoundingClientRect().top);
+            await page.evaluate(() => window.scrollTo(0, 350));
+            if (page === b) expect(await page.evaluate(() => window.scrollY)).toBeGreaterThanOrEqual(300);
+            await expect.poll(async () => {
+                const after = await notice.evaluate(node => node.getBoundingClientRect().top);
+                return Math.abs(after + await page.evaluate(() => window.scrollY) - before);
+            }).toBeLessThan(2);
+            await page.evaluate(() => window.scrollTo(0, 0));
         }
         await a.getByLabel('业务 COM', { exact: true }).fill('COM88');
         await expect(b.getByLabel('业务 COM', { exact: true })).toHaveValue('COM88');

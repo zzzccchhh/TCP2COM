@@ -5,6 +5,8 @@ __pycache__/
 /s3-usb.log
 /received-s3.bin
 /tcp2com_last_state.json
+/lan_service_state.json
+/lan_service_state.json.*.tmp
 /frontend/node_modules/
 /frontend/dist/
 /frontend/test-results/
