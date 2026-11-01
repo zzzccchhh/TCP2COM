@@ -96,9 +96,6 @@ select { appearance: none; width: 100%; }
 .connection-actions { margin-top: 17px; }
 .connection-actions .primary.full { justify-content: flex-start; padding-left: 14px; height: 38px; }
 .connection-note { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 9px; color: #a1a193; padding-top: 12px; line-height: 1.4; }
-.quiet-note { display: flex; gap: 8px; padding: 15px 9px; color: #98998b; }
-.quiet-note svg { flex-shrink: 0; margin-top: 3px; stroke-width: 1.4; }
-.quiet-note p { font-size: 10px; line-height: 1.9; }
 .workspace-toolbar { display: flex; gap: 10px; justify-content: space-between; align-items: center; height: 36px; margin-bottom: 12px; }
 .workspace-tabs { background: transparent; gap: 5px; padding: 0; }
 .workspace-tabs > button { font-size: 11px; padding: 9px 14px; color: #808173; }
@@ -315,8 +312,6 @@ select { appearance: none; width: 100%; }
     .connection-panel > fieldset > .form-stack { display: grid; grid-template-columns: 1fr 1fr; }
     .connection-panel > fieldset > .form-stack > .form-grid { grid-column: 1 / -1; }
     .connection-panel > fieldset > .form-stack > .field:only-child { grid-column: 1 / -1; }
-    .quiet-note { padding: 10px 5px; }
-    .quiet-note br { display: none; }
     .terminal-panel { min-height: 420px; height: 470px; }
     .device-column { grid-template-columns: 1fr; }
     .device-panel, .reset-card { grid-column: auto; grid-row: auto; margin-top: 0; }

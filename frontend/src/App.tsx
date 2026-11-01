@@ -339,7 +339,6 @@ export default function App() {
                         <p className="connection-note"><ShieldCheck size={12} />{snap.running ? snap.applied ? '当前参数已应用' : '参数有修改，应用并重启后生效' : '手动启动连接 · 不创建虚拟串口'}</p>
                     </div>
                 </section>
-                <div className="quiet-note"><Info size={14} /><p>业务 COM 用于数据转发。<br />USB COM 用于设备日志与配置，两者应选择不同端口。</p></div>
             </aside>
 
             <section className="center-column">
@@ -366,7 +365,7 @@ export default function App() {
                         <Chart samples={samples} index={0} label="网络接收" color="#526b58" />
                         <Chart samples={samples} index={1} label="COM 写入" color="#707e9c" />
                         <Chart samples={samples} index={2} label="网络发送" color="#a18256" />
-                        <p className="traffic-note">{udpMode ? 'UDP 桥接运行时更新曲线；已绑定不代表设备在线。' : 'TCP 连接建立后更新曲线，未连接或断开时保留当前曲线。'}</p>
+                        {udpMode && <p className="traffic-note">UDP 桥接运行时更新曲线；已绑定不代表设备在线。</p>}
                     </div>}
                 </section>
                 <div className="runtime-line"><Network size={13} /><span>{snap.address}</span>{snap.running_settings && <span className="runtime-com">{snap.running_settings.com} / {snap.running_settings.baud}</span>}</div>
@@ -387,7 +386,7 @@ export default function App() {
                         <div className="device-facts"><div><span>业务接口</span><strong>{snap.baseline ? ['UART 透传', 'SPI WBR/1', 'UART WBR/1'][snap.baseline.link_mode] : '—'}</strong></div><div><span>联网模式</span><strong>{snap.baseline ? ['自建热点 AP', '电脑热点 STA', '共享 Wi-Fi STA'][snap.baseline.mode] : '—'}</strong></div></div>
                         <button className="button secondary full" disabled={waiting} onClick={() => run(readConfig)}>{working ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}读取设备配置</button>
                         <button className="button full" onClick={() => setDrawer('config')}><SlidersHorizontal size={14} />打开配置面板<ArrowRight size={14} /></button>
-                        <p className="setup-note"><Info size={12} /><span>配网：GPIO{device === 'c5' ? '24' : '4'} 长按 3 秒进入配网。</span></p>
+                        <p className="setup-note"><Info size={12} /><span>配网：{device === 'c5' ? 'Key' : 'GPIO4'} 长按 3 秒进入配网。</span></p>
                     </> : <p className="setup-note">ESP-01S 保留透传和远程复位功能。</p>}
                 </section>
 
