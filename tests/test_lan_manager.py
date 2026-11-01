@@ -17,10 +17,11 @@ class SharingTests(unittest.TestCase):
 
     def test_share_link_only_contains_address_in_fragment(self):
         address = 'http://192.168.1.9:8765/'
-        url = urlsplit(pairing_link(address))
+        url = urlsplit(pairing_link(address, 'test-invitation'))
         self.assertEqual(url.query, '')
-        self.assertEqual(parse_qs(url.fragment), {'service': [address]})
+        self.assertEqual(parse_qs(url.fragment), {'service': [address], 'invite': ['test-invitation']})
         self.assertTrue(pairing_link(address).startswith(ONLINE_URL))
+        self.assertTrue(pairing_link(address, 'test-invitation', online=False).startswith(address))
 
     def test_addresses_respect_bind_and_include_local_fallback(self):
         self.assertEqual(service_addresses('127.0.0.1', 9000), ['http://127.0.0.1:9000/'])
@@ -83,10 +84,28 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(self.root.clipboard_get(), ONLINE_URL)
         self.manager.address.set('http://192.168.1.9:8765/')
         self.manager.update_qr()
-        self.assertEqual(self.manager.link.get(), pairing_link('http://192.168.1.9:8765/'))
+        self.assertEqual(self.manager.link.get(), pairing_link('http://192.168.1.9:8765/', self.adapter.invite, online=False))
+        self.assertEqual(self.manager.online_link.get(), pairing_link('http://192.168.1.9:8765/', self.adapter.invite))
         self.assertGreater(self.manager.photo.width(), 100)
         self.manager.copy(self.manager.link.get())
         self.assertEqual(self.root.clipboard_get(), self.manager.link.get())
+
+    def test_online_buttons_follow_address_and_link_rotation(self):
+        def walk(parent):
+            for child in parent.winfo_children():
+                yield child
+                yield from walk(child)
+        buttons = {str(widget.cget('text')): widget for widget in walk(self.root) if widget.winfo_class() == 'TButton'}
+        self.manager.address.set('http://192.168.1.11:8765/')
+        self.manager.update_qr()
+        buttons['复制网址'].invoke()
+        self.assertEqual(self.root.clipboard_get(), self.manager.online_link.get())
+        with mock.patch('lan_manager.webbrowser.open') as open_page:
+            buttons['打开网页'].invoke()
+            open_page.assert_called_once_with(self.manager.online_link.get())
+        previous = self.manager.online_link.get()
+        self.manager.rotate_links()
+        self.assertNotEqual(previous, self.manager.online_link.get())
 
     def test_small_window_can_scroll_to_footer_and_revoke(self):
         self.root.geometry('860x600+3500+100')

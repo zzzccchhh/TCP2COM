@@ -13,9 +13,9 @@ import webbrowser
 ONLINE_URL = "https://zzzccchhh.github.io/TCP2COM/"
 
 
-def pairing_link(address):
+def pairing_link(address, invite="", online=True):
     # Fragment stays in the browser; no LAN address is sent to the static host.
-    return ONLINE_URL + "#" + urlencode({"service": address})
+    return (ONLINE_URL if online else address.rstrip('/') + '/') + "#" + urlencode({"service": address, "invite": invite})
 
 
 def service_addresses(host, port):
@@ -38,6 +38,7 @@ class Manager:
         self.root, self.server, self.adapter = root, server, adapter
         self.closed = False
         self.previous = None
+        self.online_link = tk.StringVar()
         root.title("Wi-Fi Bridge · 局域网服务管理")
         root.geometry(f"1080x{min(900, max(640, root.winfo_screenheight() - 100))}")
         root.minsize(860, 600)
@@ -63,8 +64,8 @@ class Manager:
         ttk.Label(box, text="Wi-Fi Bridge · 服务管理", style="Title.TLabel").pack(anchor="w")
         self.status = tk.StringVar(value="服务运行中 · 等待网页申请配对")
         ttk.Label(box, textvariable=self.status).pack(anchor="w", pady=(6, 16))
-        self.notice = tk.StringVar(value="① 打开网页或扫码  →  ② 网页请求配对  →  ③ 在下方选择申请并允许")
-        self.address_row(box, "在线工作台", ONLINE_URL)
+        self.notice = tk.StringVar(value="打开网页 / 复制网址 / 扫码均自动连接，无需请求或允许；不会自动启动串口或 USB。")
+        self.address_row(box, "在线工作台", self.online_link)
         addresses = service_addresses(*server.server_address)
         row = ttk.Frame(box)
         row.pack(fill="x", pady=6)
@@ -72,32 +73,38 @@ class Manager:
         self.address = tk.StringVar(value=addresses[0])
         self.selector = ttk.Combobox(row, textvariable=self.address, values=addresses, state="readonly", font=("Consolas", 11))
         self.selector.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        ttk.Button(row, text="复制地址", command=lambda: self.copy(self.address.get())).pack(side="left", padx=3)
-        ttk.Button(row, text="本地工作台", command=lambda: webbrowser.open(self.address.get())).pack(side="left", padx=3)
+        ttk.Button(row, text="复制地址", command=lambda: self.copy(self.link.get())).pack(side="left", padx=3)
+        ttk.Button(row, text="本地工作台", command=lambda: webbrowser.open(self.link.get())).pack(side="left", padx=3)
         sharing = ttk.Frame(box)
         sharing.pack(fill="x", pady=8)
         self.qr = ttk.Label(sharing)
         self.qr.pack(side="right", padx=(20, 0))
         info = ttk.Frame(sharing)
         info.pack(side="left", fill="both", expand=True)
-        ttk.Label(info, text="手机扫码 / 分享配对链接", font=("Microsoft YaHei UI", 12, "bold")).pack(anchor="w", pady=4)
-        ttk.Label(info, text="打开在线工作台并自动填入服务地址，仍需本机允许。\n多网卡时请选择手机可访问的地址。\n127.0.0.1 仅供这台电脑使用。", wraplength=650).pack(anchor="w")
+        ttk.Label(info, text="扫码直接连接局域网工作台", font=("Microsoft YaHei UI", 12, "bold")).pack(anchor="w", pady=4)
+        ttk.Label(info, text="手机扫码后自动连接当前服务，不依赖外网。\n多网卡时请选择手机可访问的地址。\n127.0.0.1 仅供这台电脑使用。", wraplength=650).pack(anchor="w")
         self.link = tk.StringVar()
         ttk.Entry(info, textvariable=self.link, state="readonly").pack(fill="x", pady=8)
-        ttk.Button(info, text="复制配对链接", command=lambda: self.copy(self.link.get())).pack(anchor="w")
+        buttons = ttk.Frame(info)
+        buttons.pack(anchor="w")
+        ttk.Button(buttons, text="复制扫码连接链接", command=lambda: self.copy(self.link.get())).pack(side="left")
+        ttk.Button(buttons, text="刷新连接链接 / 二维码", command=self.rotate_links).pack(side="left", padx=8)
         self.selector.bind("<<ComboboxSelected>>", lambda event: self.update_qr())
         self.update_qr()
         ttk.Label(box, textvariable=self.notice, wraplength=950).pack(anchor="w", pady=(3, 12))
-        ttk.Label(box, text="待审批申请（有效期 2 分钟）", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w")
-        self.pending = self.tree(box, ("编号", "终端名称", "来源 IP", "申请时间"), 3)
-        actions = ttk.Frame(box)
+        self.legacy_visible = tk.BooleanVar(value=False)
+        ttk.Checkbutton(box, text="显示旧版网页的兼容审批（新链接无需审批）", variable=self.legacy_visible, command=self.toggle_legacy).pack(anchor="w", pady=6)
+        self.legacy = ttk.Frame(box)
+        self.pending = self.tree(self.legacy, ("编号", "终端名称", "来源 IP", "申请时间"), 3)
+        actions = ttk.Frame(self.legacy)
         actions.pack(fill="x", pady=6)
         ttk.Button(actions, text="允许配对", command=lambda: self.decide(True)).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="拒绝申请", command=lambda: self.decide(False)).pack(side="left")
-        ttk.Label(box, text="已配对终端", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w", pady=(8, 0))
+        self.peers_heading = ttk.Label(box, text="已连接终端", font=("Microsoft YaHei UI", 11, "bold"))
+        self.peers_heading.pack(anchor="w", pady=(8, 0))
         self.peers = self.tree(box, ("编号", "终端名称", "来源 IP"), 3)
         ttk.Button(box, text="撤销选中终端", command=self.revoke).pack(anchor="w", pady=8)
-        ttk.Label(box, text="关闭此窗口将停止服务并释放设备；重启服务后所有终端需重新申请配对。", wraplength=950).pack(anchor="w")
+        ttk.Label(box, text="关闭窗口停止服务。重启后请重新打开连接链接；刷新链接不影响已连接终端。", wraplength=950).pack(anchor="w")
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.refresh()
 
@@ -105,12 +112,10 @@ class Manager:
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=6)
         ttk.Label(row, text=title, width=12).pack(side="left")
-        field = ttk.Entry(row, font=("Consolas", 11))
-        field.insert(0, value)
-        field.configure(state="readonly")
+        field = ttk.Entry(row, textvariable=value, font=("Consolas", 11), state="readonly")
         field.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        ttk.Button(row, text="复制网址", command=lambda: self.copy(value)).pack(side="left", padx=3)
-        ttk.Button(row, text="打开网页", command=lambda: webbrowser.open(value)).pack(side="left", padx=3)
+        ttk.Button(row, text="复制网址", command=lambda: self.copy(value.get())).pack(side="left", padx=3)
+        ttk.Button(row, text="打开网页", command=lambda: webbrowser.open(value.get())).pack(side="left", padx=3)
 
     def tree(self, parent, columns, height):
         frame = ttk.Frame(parent)
@@ -126,14 +131,26 @@ class Manager:
         return tree
 
     def update_qr(self):
-        self.link.set(pairing_link(self.address.get()))
-        qr = self.qrcode.QRCode(box_size=3, border=3)
+        self.link.set(pairing_link(self.address.get(), self.adapter.invite, online=False))
+        self.online_link.set(pairing_link(self.address.get(), self.adapter.invite))
+        qr = self.qrcode.QRCode(box_size=4, border=4)
         qr.add_data(self.link.get())
         qr.make(fit=True)
         buffer = io.BytesIO()
         qr.make_image(fill_color="#282c25", back_color="#ffffff").save(buffer, format="PNG")
         self.photo = tk.PhotoImage(data=base64.b64encode(buffer.getvalue()))
         self.qr.configure(image=self.photo)
+
+    def rotate_links(self):
+        self.adapter.rotate_invite()
+        self.update_qr()
+        self.notice.set("连接链接和二维码已更新；旧链接失效，已连接终端不受影响。")
+
+    def toggle_legacy(self):
+        if self.legacy_visible.get():
+            self.legacy.pack(fill="x", before=self.peers_heading)
+        else:
+            self.legacy.pack_forget()
 
     def copy(self, value):
         self.root.clipboard_clear()
@@ -175,7 +192,7 @@ class Manager:
                 if selected and tree.exists(selected[0]):
                     tree.selection_set(selected)
             self.previous = snapshot
-        self.status.set(f"服务运行中 · 端口 {self.server.server_port} · 待审批 {len(pending)} · 已配对 {len(peers)}")
+        self.status.set(f"服务运行中 · 端口 {self.server.server_port} · 自动接入已启用 · 已连接 {len(peers)}" + (f" · 旧版申请 {len(pending)}" if pending else ""))
         if schedule:
             self.root.after(500, self.refresh)
 

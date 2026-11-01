@@ -1,4 +1,5 @@
 import json
+import secrets
 from pathlib import Path
 import tempfile
 import threading
@@ -37,6 +38,36 @@ class LANTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.call(self.b, 'update_settings', [{'com': 'COM99'}], revision=0)
         self.assertEqual(self.call(self.a, 'initial')['data']['settings']['com'], 'COM88')
+
+    def test_auto_connect_requires_invite_and_does_not_start_hardware(self):
+        for invite in (None, '', 'bad'):
+            with self.assertRaises(PermissionError):
+                self.adapter.connect(invite, '扫码手机', '127.0.0.4', secrets.token_hex(16))
+        token = self.adapter.connect(self.adapter.invite, '扫码手机', '127.0.0.4', secrets.token_hex(16))['token']
+        state = self.call(token, 'poll')['data']
+        self.assertFalse(state['running'])
+        self.assertIsNone(state['usb'])
+        self.assertEqual(self.adapter.management_snapshot()[0], [])
+
+    def test_auto_enrollment_is_idempotent_and_revocation_prevents_replay(self):
+        join = secrets.token_hex(16)
+        result = self.adapter.connect(self.adapter.invite, '扫码手机', '127.0.0.4', join)
+        self.assertEqual(result, self.adapter.connect(self.adapter.invite, '扫码手机', '127.0.0.4', join))
+        peer = next(p for p in self.adapter.management_snapshot()[1] if p['name'] == '扫码手机')
+        self.adapter.revoke_client(peer['id'])
+        with self.assertRaises(PermissionError):
+            self.adapter.connect(self.adapter.invite, '扫码手机', '127.0.0.4', join)
+        with self.assertRaises(PermissionError):
+            self.call(result['token'], 'poll')
+
+    def test_refresh_links_does_not_disconnect_enrolled_terminals(self):
+        invite = self.adapter.invite
+        token = self.adapter.connect(invite, '扫码手机', '127.0.0.4', secrets.token_hex(16))['token']
+        self.adapter.rotate_invite()
+        with self.assertRaises(PermissionError):
+            self.adapter.connect(invite, 'another', '127.0.0.5', secrets.token_hex(16))
+        self.assertTrue(self.call(token, 'poll')['ok'])
+        self.assertNotIn(self.adapter.invite, json.dumps(self.adapter.management_snapshot()))
 
     def test_pair_expiry_throttle_and_revocation(self):
         for _ in range(5):
@@ -99,7 +130,7 @@ class LANTests(unittest.TestCase):
         self.assertEqual(two['data']['count'], 1)
 
     def test_http_cors_auth_and_static_root(self):
-        Path(self.temp.name, 'index.html').write_text('<h1>test</h1>', encoding='utf-8')
+        Path(self.temp.name, 'index.html').write_text('<html><head></head><body><h1>test</h1></body></html>', encoding='utf-8')
         server = make_server('127.0.0.1', 0, self.adapter, self.temp.name)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -112,7 +143,11 @@ class LANTests(unittest.TestCase):
             if token: headers['Authorization'] = 'Bearer ' + token
             return urlopen(Request(base + path, data=json.dumps(body).encode() if body is not None else None, headers=headers), timeout=3)
         with request('/') as response:
-            self.assertIn(b'<h1>', response.read())
+            body = response.read()
+            self.assertIn(b'<h1>', body)
+            self.assertIn(b'window.__WIFI_BRIDGE__', body)
+            self.assertIn(self.adapter.invite.encode(), body)
+            self.assertIn('no-store', response.headers.get_all('Cache-Control'))
         for path in ['/../lan_service.py', '/%2e%2e/lan_service.py', '/api/call']:
             with self.assertRaises(HTTPError) as caught:
                 request(path, {'method': 'poll', 'args': []} if path == '/api/call' else None)

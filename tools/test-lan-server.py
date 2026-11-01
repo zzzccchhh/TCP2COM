@@ -5,6 +5,7 @@ import tempfile
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lan_service import LANService, make_server
@@ -20,8 +21,22 @@ if __name__ == '__main__':
             def log_message(self, *args):
                 pass
 
+            def do_GET(self):
+                suffix = '#' + urlencode({'service': 'http://127.0.0.1:8766/', 'invite': adapter.invite})
+                body = json.dumps({'online': 'http://127.0.0.1:4173/' + suffix, 'local': 'http://127.0.0.1:8766/' + suffix, 'invite': adapter.invite}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_POST(self):
                 data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                if data.get('action') == 'rotate':
+                    adapter.rotate_invite()
+                    self.send_response(200)
+                    self.end_headers()
+                    return
                 pending, _ = adapter.management_snapshot()
                 item = next(p for p in pending if p['name'] == data['name'])
                 if data.get('expire'):

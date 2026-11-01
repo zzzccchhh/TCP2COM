@@ -9,7 +9,7 @@ import {
 import { applyDraft, call, defaults, deviceDefaults, download, emptySnapshot, isTrafficActive, labels, size } from './api';
 import type { Data } from './api';
 import Pairing from './Pairing';
-import { isLAN } from './lan';
+import { getLANStatus, isLAN } from './lan';
 
 type FieldProps = {
     label: string; value: any; onChange: (value: any) => void;
@@ -101,13 +101,14 @@ export default function App() {
         let stopped = false;
         let polling: ReturnType<typeof setTimeout>;
         let initialized = false;
-        async function poll() {
-            if (stopped) return;
+        let generation = 0;
+        async function poll(turn = generation) {
+            if (stopped || turn !== generation) return;
             try {
                 const next = await call<Data>('poll', cursor.current);
-                if (stopped) return;
+                if (stopped || turn !== generation) return;
                 if (next.epoch < lastEpoch.current) {
-                    polling = setTimeout(poll, 250);
+                    polling = setTimeout(() => poll(turn), 250);
                     return;
                 }
                 setSnap(next);
@@ -129,26 +130,28 @@ export default function App() {
                 if (isTrafficActive(next, settingsRef.current.mode)) {
                     setSamples(previous => [...previous, next.rates].slice(-120));
                 }
-            } catch (error) { if (!stopped) {
+            } catch (error) { if (!stopped && turn === generation) {
                 notify(`界面连接异常：${String(error)}`);
                 if (isLAN()) setSnap(previous => ({ ...previous, connected: false, running: false, state_status: '与局域网服务失去联系，请检查连接或重新配对' }));
             } }
-            if (!stopped) polling = setTimeout(poll, 250);
+            if (!stopped && turn === generation && getLANStatus().state !== 'revoked') polling = setTimeout(() => poll(turn), 250);
         }
         async function initialize() {
-            if ((initialized && !isLAN()) || !window.pywebview?.api) return;
+            const api = window.pywebview?.api;
+            if ((initialized && !isLAN()) || !api || !['initial', 'poll', 'ports'].every(method => typeof api[method] === 'function')) return;
+            const turn = ++generation;
             clearTimeout(polling);
             if (isLAN()) { cursor.current = 0; lastEpoch.current = 0; logGeneration.current = 0; setLogs([]); setSamples([]); }
             initialized = true;
             try {
                 const data = await call<Data>('initial');
-                if (stopped) return;
+                if (stopped || turn !== generation) return;
                 settingsRef.current = { ...defaults, ...data.settings };
                 setSettings(settingsRef.current); setConfig(data.config); setDrafts(data.drafts);
                 setNative(true); setReady(true);
                 await refreshPorts();
-                await poll();
-            } catch (error) { if (!stopped) notify(String(error)); }
+                await poll(turn);
+            } catch (error) { if (!stopped && turn === generation) { initialized = false; notify(String(error)); } }
         }
         window.addEventListener('pywebviewready', initialize);
         initialize();
@@ -297,7 +300,7 @@ export default function App() {
             </select><ChevronDown size={14} /></div></div>
         </section>
 
-        {!native && ready && <div className="preview-banner"><Info size={14} /><span>浏览器界面预览 · 可通过右上角「局域网配对」连接服务，也可运行桌面版「启动_新版界面.vbs」</span></div>}
+        {!native && ready && <div className="preview-banner"><Info size={14} /><span>浏览器界面预览 · 打开服务端的连接链接或扫码可自动连接，也可通过右上角「局域网连接」重试。</span></div>}
 
         <main className="workspace">
             <aside className="connection-column">

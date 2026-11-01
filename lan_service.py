@@ -1,6 +1,7 @@
 """LAN HTTP adapter. Only this process owns serial ports and device sessions."""
 
 import argparse
+import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
@@ -29,6 +30,41 @@ class LANService:
         self.command = threading.Lock()
         self.revision = 0
         self.reset_owner = None
+        self.invite = secrets.token_urlsafe(24)
+        self.join_attempts = {}
+        self.revoked_joins = set()
+
+    def rotate_invite(self):
+        with self.lock:
+            self.invite = secrets.token_urlsafe(24)
+            return self.invite
+
+    def connect(self, invite, name, address, join_id):
+        """A native share link preauthorizes enrollment; never starts hardware."""
+        with self.lock:
+            if not isinstance(invite, str) or not hmac.compare_digest(invite, self.invite):
+                raise PermissionError("连接链接已失效，请从服务端重新复制网址或扫码")
+            if not isinstance(join_id, str) or not 24 <= len(join_id) <= 128:
+                raise ValueError("配对连接标识不正确")
+            if join_id in self.revoked_joins:
+                raise PermissionError("终端已撤销，请重新打开服务端连接链接")
+            if not isinstance(name, str) or not name.strip() or len(name) > 60:
+                raise ValueError("配对终端名称应为 1～60 个字符")
+            for token, client in self.clients.items():
+                if client.get("join_id") == join_id:
+                    return {"token": token}
+            now = time.monotonic()
+            self.join_attempts = {ip: times for ip, times in self.join_attempts.items() if times and now - times[-1] < 60}
+            recent = [t for t in self.join_attempts.get(address, []) if now - t < 60]
+            if len(recent) >= 20:
+                raise ValueError("配对连接过于频繁，请稍后重试")
+            if len(self.clients) >= 32:
+                raise ValueError("已配对终端达到上限，请先撤销终端")
+            self.join_attempts[address] = recent + [now]
+            token = secrets.token_urlsafe(32)
+            self.clients[token] = {"id": secrets.token_hex(8), "name": name.strip(), "address": address,
+                                   "read_epoch": None, "join_id": join_id}
+            return {"token": token}
 
     def _expire(self):
         now = time.monotonic()
@@ -92,6 +128,8 @@ class LANService:
             for key, value in list(self.clients.items()):
                 if value["id"] == client_id:
                     del self.clients[key]
+                    if value.get("join_id"):
+                        self.revoked_joins.add(value["join_id"])
                     for item in self.pending.values():
                         if item.get("token") == key:
                             item["state"] = "cancelled"
@@ -189,8 +227,11 @@ def make_server(host, port, adapter, dist=None):
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
             self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.end_headers()
+                self.wfile.write(body)
+            except (ConnectionError, TimeoutError):
+                pass  # A closed browser tab is not a service failure.
 
         def do_OPTIONS(self):
             if not self.allowed():
@@ -213,7 +254,9 @@ def make_server(host, port, adapter, dist=None):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError("请求格式不正确")
-                if self.path == "/api/pair/request":
+                if self.path == "/api/connect":
+                    result = {"ok": True, "data": adapter.connect(data.get("invite"), data.get("name"), self.client_address[0], data.get("join_id"))}
+                elif self.path == "/api/pair/request":
                     result = {"ok": True, "data": adapter.request_pair(data.get("name", ""), self.client_address[0])}
                 elif self.path in ("/api/pair/status", "/api/pair/cancel"):
                     result = {"ok": True, "data": adapter.pairing_status(data.get("request", ""), self.path.endswith("cancel"))}
@@ -241,13 +284,23 @@ def make_server(host, port, adapter, dist=None):
                 return self.reply(404, {"ok": False, "error": "页面不存在，请先构建前端"})
             import mimetypes
             body = path.read_bytes()
+            if path == root / "index.html":
+                # Local pages work offline and can enroll directly on this service.
+                bootstrap = '<script>window.__WIFI_BRIDGE__=' + json.dumps({"invite": adapter.invite}) + ';</script>'
+                body = body.replace(b'<head>', b'<head>' + bootstrap.encode('utf-8'), 1)
             self.send_response(200)
             self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Cache-Control", "no-store" if path == root / "index.html" else "no-cache")
+            if path == root / "index.html":
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.end_headers()
+                self.wfile.write(body)
+            except (ConnectionError, TimeoutError):
+                pass
 
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
@@ -259,14 +312,16 @@ def main():
     parser.add_argument("--listen", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--origin", action="append", default=["https://zzzccchhh.github.io"])
-    parser.add_argument("--headless", action="store_true", help="只运行服务（无审批窗口，用于诊断）")
+    parser.add_argument("--headless", action="store_true", help="只运行服务，不显示管理窗口")
     args = parser.parse_args()
+    if not (BASE / "frontend" / "dist" / "index.html").is_file():
+        raise ValueError("本地网页尚未构建。请在 frontend 目录运行 npm ci 和 npm run build，再启动局域网服务。")
     adapter = LANService(origins=args.origin)
     server = make_server(args.listen, args.port, adapter)
     print(f"本机页面：http://127.0.0.1:{args.port}/", flush=True)
     for address in sorted({x[4][0] for x in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)}):
         print(f"局域网页面：http://{address}:{args.port}/", flush=True)
-    print("在线工作台：https://zzzccchhh.github.io/TCP2COM/\n请在服务管理窗口允许配对申请。", flush=True)
+    print("在线工作台：https://zzzccchhh.github.io/TCP2COM/\n使用服务管理窗口的打开网页、复制网址或二维码即可自动连接。", flush=True)
     try:
         if args.headless:
             server.serve_forever()

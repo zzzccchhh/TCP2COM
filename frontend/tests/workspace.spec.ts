@@ -41,6 +41,21 @@ test('browser preview is explicit and does not pretend to connect', async ({ pag
     expect(errors).toEqual([]);
 });
 
+test('desktop waits for native methods before initializing', async ({ page }) => {
+    await page.addInitScript(() => { window.pywebview = { api: {} }; });
+    await page.goto('/');
+    await page.evaluate(({ settings, config, snapshot }) => {
+        window.pywebview = { api: {
+            initial: async () => ({ ok: true, data: { settings, config, drafts: {} } }),
+            ports: async () => ({ ok: true, data: [] }),
+            poll: async () => ({ ok: true, data: snapshot }),
+        } };
+        window.dispatchEvent(new Event('pywebviewready'));
+    }, { settings: defaults, config: deviceDefaults('c5'), snapshot: emptySnapshot });
+    await expect(page.getByText('本地运行', { exact: true })).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: 'is not a function' })).toHaveCount(0);
+});
+
 for (const width of [1440, 960, 390]) {
     test(`layout fits ${width}px and all panels remain reachable`, async ({ page }) => {
         await page.setViewportSize({ width, height: 1000 });

@@ -1,50 +1,129 @@
 import { expect, test } from '@playwright/test';
 
-test('desktop and phone pair, synchronize settings, reload and revoke a peer', async ({ browser, request }) => {
+test.describe.configure({ mode: 'serial' });
+const fixture = 'http://127.0.0.1:8767';
+
+test('online links auto connect desktop and mobile, synchronize and revoke without approval', async ({ browser, request }) => {
+    const links = await (await request.get(fixture)).json();
     const desktop = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const a = await desktop.newPage(), b = await mobile.newPage();
     try {
-        for (const [page, name] of [[a, '测试电脑'], [b, '测试手机']] as const) {
-            await page.goto('/#service=' + encodeURIComponent('127.0.0.1:8766'));
-            await expect(page.getByLabel('服务地址', { exact: true })).toHaveValue('127.0.0.1:8766');
-            await page.getByLabel('终端名称', { exact: true }).fill(name);
-            await page.getByRole('button', { name: '请求配对', exact: true }).click();
-            await expect(page.getByText(/等待服务端允许 · 请求编号/)).toBeVisible();
-            await expect(page.getByText('已配对，所有终端共享设备状态。')).toHaveCount(0);
-            expect((await request.post('http://127.0.0.1:8767', { data: { name } })).ok()).toBeTruthy();
-            await expect(page.getByText('已配对，所有终端共享设备状态。')).toBeVisible();
+        for (const page of [a, b]) {
+            await page.goto(links.online);
+            await expect(page.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
+            await expect(page.getByRole('button', { name: '请求配对', exact: true })).toHaveCount(0);
             expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-            await page.getByRole('button', { name: '关闭配对面板' }).click();
+            expect(new URL(page.url()).hash).toBe('');
+            await expect(page.getByRole('button', { name: '启动桥接', exact: true })).toBeVisible();
+            await expect(page.getByRole('button', { name: '连接 USB', exact: true })).toBeVisible();
         }
         await a.getByLabel('业务 COM', { exact: true }).fill('COM88');
         await expect(b.getByLabel('业务 COM', { exact: true })).toHaveValue('COM88');
         await b.reload();
+        await expect(b.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
         await expect(b.getByLabel('业务 COM', { exact: true })).toHaveValue('COM88');
-        await a.getByRole('button', { name: '局域网配对', exact: true }).click();
-        await expect(a.getByRole('listitem').filter({ hasText: '测试手机' })).toBeVisible();
-        await a.getByRole('listitem').filter({ hasText: '测试手机' }).getByRole('button', { name: '撤销配对' }).click();
-        await expect(a.getByRole('listitem').filter({ hasText: '测试手机' })).toHaveCount(0);
-        await expect(b.getByRole('status').filter({ hasText: '配对已失效' })).toBeVisible();
-        await a.getByRole('button', { name: '关闭配对面板' }).click();
+        await a.getByRole('button', { name: '局域网连接', exact: true }).click();
+        const mobilePeer = a.getByRole('listitem').filter({ hasText: '手机 / 平板浏览器' });
+        await expect(mobilePeer).toBeVisible();
+        await mobilePeer.getByRole('button', { name: '撤销连接' }).click();
+        await expect(b.getByRole('status', { name: '服务连接状态', exact: true })).toContainText('已撤销');
+        await b.reload();
+        await expect(b.getByRole('status', { name: '服务连接状态', exact: true })).toContainText('已断开或被撤销');
+        const notice = await b.getByRole('status', { name: '服务连接状态', exact: true }).boundingBox();
+        expect(notice!.x).toBeGreaterThanOrEqual(0);
+        expect(notice!.x + notice!.width).toBeLessThanOrEqual(390);
+        await a.getByRole('button', { name: '关闭连接面板' }).click();
         await a.screenshot({ path: 'test-results/lan-desktop.png', fullPage: true });
         await b.screenshot({ path: 'test-results/lan-mobile.png', fullPage: true });
     } finally { await desktop.close(); await mobile.close(); }
 });
 
-test('pairing handles rejection, cancellation and expiry', async ({ page, request }) => {
-    await page.goto('/#service=' + encodeURIComponent('http://127.0.0.1:8766/'));
-    for (const [name, action, expected] of [
-        ['拒绝测试', 'reject', '服务端已拒绝申请'],
-        ['取消测试', 'cancel', '已取消配对申请'],
-        ['超时测试', 'expire', '配对申请已取消或超时'],
-    ]) {
-        await page.getByLabel('终端名称', { exact: true }).fill(name);
-        await page.getByRole('button', { name: '请求配对', exact: true }).click();
-        await expect(page.getByText(/等待服务端允许 · 请求编号/)).toBeVisible();
-        if (action === 'cancel') await page.getByRole('button', { name: '取消申请' }).click();
-        else expect((await request.post('http://127.0.0.1:8767', { data: { name, allow: false, expire: action === 'expire' } })).ok()).toBeTruthy();
-        await expect(page.getByRole('status').filter({ hasText: expected })).toBeVisible();
-        await expect(page.getByRole('button', { name: '请求配对', exact: true })).toBeEnabled();
+test('local QR link and plain LAN page auto connect without internet', async ({ browser, request }) => {
+    const links = await (await request.get(fixture)).json();
+    for (const target of [links.local, 'http://127.0.0.1:8766/']) {
+        const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+        const page = await context.newPage();
+        try {
+            await context.route('https://**/*', route => route.abort());
+            await page.goto(target);
+            await expect(page.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
+            await expect(page.getByRole('button', { name: '启动桥接', exact: true })).toBeVisible();
+            await page.getByRole('button', { name: '局域网连接', exact: true }).click();
+            await expect(page.getByRole('region', { name: '局域网连接', exact: true })).toBeVisible();
+            await page.getByRole('button', { name: '关闭连接面板' }).click();
+            expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        } finally { await context.close(); }
     }
+});
+
+test('fixed frontend URL restores last service in a new tab and disconnect remains disconnected', async ({ context, page, request }) => {
+    const links = await (await request.get(fixture)).json();
+    await page.goto(links.online);
+    await expect(page.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
+    const other = await context.newPage();
+    await other.goto('/');
+    await expect(other.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
+    await other.getByRole('button', { name: '局域网连接', exact: true }).click();
+    await other.getByRole('button', { name: '断开本终端' }).click();
+    await expect(other.getByRole('status', { name: '服务连接状态', exact: true })).toContainText('已断开或被撤销');
+    await other.close();
+});
+
+test('fresh fixed frontend does not guess service or make enrollment requests', async ({ page }) => {
+    let requests = 0;
+    page.on('request', req => { if (req.url().includes('/api/')) requests++; });
+    await page.goto('/');
+    await expect(page.getByText('浏览器界面预览', { exact: false })).toBeVisible();
+    expect(requests).toBe(0);
+});
+
+test('rotated links reject stale enrollment while connected sessions keep working', async ({ browser, request }) => {
+    const links = await (await request.get(fixture)).json();
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const fresh = await browser.newContext();
+    const oldLink = await fresh.newPage();
+    try {
+        await page.goto(links.online);
+        await expect(page.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
+        await request.post(fixture, { data: { action: 'rotate' } });
+        await oldLink.goto(links.online);
+        await expect(oldLink.getByRole('status', { name: '服务连接状态', exact: true })).toContainText('链接已失效');
+        await page.reload();
+        await expect(page.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
+        const current = await (await request.get(fixture)).json();
+        await oldLink.goto(current.online);
+        await expect(oldLink.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
+    } finally { await context.close(); await fresh.close(); }
+});
+
+test('network failure explains retry and local entry, then retry succeeds', async ({ page, request }) => {
+    const links = await (await request.get(fixture)).json();
+    await page.route('**/api/connect', route => route.abort());
+    await page.goto(links.online);
+    await expect(page.getByRole('status', { name: '服务连接状态', exact: true })).toContainText('无法连接服务');
+    await page.unroute('**/api/connect');
+    await page.getByRole('button', { name: '局域网连接', exact: true }).click();
+    await expect(page.getByRole('button', { name: '打开局域网工作台' })).toBeVisible();
+    await page.getByRole('button', { name: '连接服务 / 重试' }).click();
+    await expect(page.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
+});
+
+test('lost enrollment response retries the same enrollment instead of adding a second terminal', async ({ page, request }) => {
+    const links = await (await request.get(fixture)).json();
+    const identifiers: string[] = [];
+    let first = true;
+    await page.route('**/api/connect', async route => {
+        identifiers.push(route.request().postDataJSON().join_id);
+        if (first) { first = false; await route.fetch(); await route.abort(); }
+        else await route.continue();
+    });
+    await page.goto(links.online);
+    await expect(page.getByRole('status', { name: '服务连接状态', exact: true })).toContainText('无法连接服务');
+    await page.getByRole('button', { name: '局域网连接', exact: true }).click();
+    await page.getByRole('button', { name: '连接服务 / 重试' }).click();
+    await expect(page.getByRole('status', { name: '服务连接状态', exact: true })).toHaveText('服务已连接');
+    expect(identifiers).toHaveLength(2);
+    expect(identifiers[0]).toBe(identifiers[1]);
 });
