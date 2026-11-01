@@ -5,5 +5,5 @@ if not exist frontend\dist\index.html (
   pause
   exit /b 1
 )
-py -3 -B -X utf8 lan_service.py %*
+py -3 -B -X utf8 lan_manager.py %*
 pause

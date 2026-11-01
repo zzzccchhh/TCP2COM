@@ -1,7 +1,6 @@
 """LAN HTTP adapter. Only this process owns serial ports and device sessions."""
 
 import argparse
-import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
@@ -23,8 +22,7 @@ class LANService:
     def __init__(self, service=None, origins=()):
         self.service = service or WebService()
         self.origins = set(origins)
-        self.code = secrets.token_hex(4).upper()
-        self.code_until = time.monotonic() + 600
+        self.pending = {}
         self.clients = {}
         self.failures = {}
         self.lock = threading.RLock()
@@ -32,21 +30,71 @@ class LANService:
         self.revision = 0
         self.reset_owner = None
 
-    def pair(self, code, name, address):
+    def _expire(self):
+        now = time.monotonic()
+        for key, item in list(self.pending.items()):
+            if now > item["until"]:
+                del self.pending[key]
+        self.failures = {ip: times for ip, times in self.failures.items() if times and now - times[-1] < 60}
+
+    def request_pair(self, name, address):
         with self.lock:
+            self._expire()
             now = time.monotonic()
-            attempts, retry = self.failures.get(address, (0, 0))
-            if retry > now:
-                raise ValueError("配对尝试过多，请一分钟后重试")
-            if now > self.code_until or not hmac.compare_digest(str(code), self.code):
-                self.failures[address] = (attempts + 1, now + 60 if attempts >= 4 else 0)
-                raise ValueError("配对码不正确或已过期，请在服务电脑查看新码")
-            if len(self.clients) >= 32:
-                raise ValueError("已配对终端达到上限，请撤销不用的终端")
-            self.failures.pop(address, None)
-            token = secrets.token_urlsafe(32)
-            self.clients[token] = {"id": secrets.token_hex(8), "name": str(name)[:60] or "浏览器", "read_epoch": None}
-            return {"token": token}
+            recent = [t for t in self.failures.get(address, []) if now - t < 60]
+            if len(recent) >= 5 or len(self.pending) >= 64:
+                raise ValueError("配对申请过多，请一分钟后重试")
+            if not isinstance(name, str) or not name.strip() or len(name) > 60:
+                raise ValueError("配对终端名称应为 1～60 个字符")
+            self.failures[address] = recent + [now]
+            secret = secrets.token_urlsafe(32)
+            item = {"id": secrets.token_hex(4).upper(), "name": name.strip(), "address": address,
+                    "created": time.strftime("%H:%M:%S"), "until": now + 120, "state": "pending"}
+            self.pending[secret] = item
+            return {"request": secret, "id": item["id"], "expires_in": 120}
+
+    def pairing_status(self, secret, cancel=False):
+        with self.lock:
+            self._expire()
+            item = self.pending.get(secret)
+            if not item:
+                return {"state": "expired"}
+            if cancel:
+                if item.get("token"):
+                    self.clients.pop(item["token"], None)
+                item["state"] = "cancelled"
+            return {"state": item["state"], **({"token": item["token"]} if item["state"] == "approved" else {})}
+
+    def decide(self, request_id, allow):
+        """Native supervisor only. This method is never exposed over HTTP."""
+        with self.lock:
+            self._expire()
+            item = next((p for p in self.pending.values() if p["id"] == request_id), None)
+            if not item or item["state"] != "pending":
+                raise ValueError("申请已取消、过期或处理，请刷新列表")
+            if allow:
+                if len(self.clients) >= 32:
+                    raise ValueError("已配对终端达到上限，请先撤销终端")
+                token = secrets.token_urlsafe(32)
+                self.clients[token] = {"id": secrets.token_hex(8), "name": item["name"], "address": item["address"], "read_epoch": None}
+                item.update(state="approved", token=token)
+            else:
+                item["state"] = "rejected"
+
+    def management_snapshot(self):
+        with self.lock:
+            self._expire()
+            return ([{k: p[k] for k in ("id", "name", "address", "created")} for p in self.pending.values() if p["state"] == "pending"],
+                    [{k: p[k] for k in ("id", "name", "address")} for p in self.clients.values()])
+
+    def revoke_client(self, client_id):
+        with self.lock:
+            for key, value in list(self.clients.items()):
+                if value["id"] == client_id:
+                    del self.clients[key]
+                    for item in self.pending.values():
+                        if item.get("token") == key:
+                            item["state"] = "cancelled"
 
     def dispatch(self, token, method, args, revision=None):
         with self.lock:
@@ -69,10 +117,7 @@ class LANService:
                 with self.lock:
                     result = {"ok": True, "data": [{"id": c["id"], "name": c["name"], "self": t == token} for t, c in self.clients.items()]}
             elif method == "revoke":
-                with self.lock:
-                    for key, value in list(self.clients.items()):
-                        if value["id"] == args[0]:
-                            del self.clients[key]
+                self.revoke_client(args[0])
                 result = {"ok": True, "data": True}
             elif method == "remember_draft":
                 # Each browser keeps its own in-memory draft; never overwrite another terminal's draft.
@@ -168,8 +213,10 @@ def make_server(host, port, adapter, dist=None):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError("请求格式不正确")
-                if self.path == "/api/pair":
-                    result = {"ok": True, "data": adapter.pair(data.get("code", ""), data.get("name", ""), self.client_address[0])}
+                if self.path == "/api/pair/request":
+                    result = {"ok": True, "data": adapter.request_pair(data.get("name", ""), self.client_address[0])}
+                elif self.path in ("/api/pair/status", "/api/pair/cancel"):
+                    result = {"ok": True, "data": adapter.pairing_status(data.get("request", ""), self.path.endswith("cancel"))}
                 elif self.path == "/api/call":
                     auth = self.headers.get("Authorization", "")
                     token = auth[7:] if auth.startswith("Bearer ") else ""
@@ -183,7 +230,7 @@ def make_server(host, port, adapter, dist=None):
                 self.reply(400, {"ok": False, "error": str(exc) if str(exc).startswith(("配对", "其他终端", "请在本终端", "已配对", "未知操作", "复位正在")) else "请求格式不正确", "revision": adapter.revision})
             except (TypeError, KeyError, IndexError, OSError):
                 # Do not expose hardware paths, submitted passwords or raw parser exceptions.
-                self.reply(400, {"ok": False, "error": "请求失败，请同步状态并核对配对码或操作参数" , "revision": adapter.revision})
+                self.reply(400, {"ok": False, "error": "请求失败，请同步状态并核对操作参数", "revision": adapter.revision})
 
         def do_GET(self):
             if not self.allowed():
@@ -212,15 +259,20 @@ def main():
     parser.add_argument("--listen", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--origin", action="append", default=["https://zzzccchhh.github.io"])
+    parser.add_argument("--headless", action="store_true", help="只运行服务（无审批窗口，用于诊断）")
     args = parser.parse_args()
     adapter = LANService(origins=args.origin)
     server = make_server(args.listen, args.port, adapter)
     print(f"本机页面：http://127.0.0.1:{args.port}/", flush=True)
     for address in sorted({x[4][0] for x in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)}):
         print(f"局域网页面：http://{address}:{args.port}/", flush=True)
-    print(f"配对码（10 分钟有效）：{adapter.code}\n服务重启后所有终端需重新配对。Ctrl+C 停止。", flush=True)
+    print("在线工作台：https://zzzccchhh.github.io/TCP2COM/\n请在服务管理窗口允许配对申请。", flush=True)
     try:
-        server.serve_forever()
+        if args.headless:
+            server.serve_forever()
+        else:
+            from lan_manager import run_manager
+            run_manager(server, adapter)
     except KeyboardInterrupt:
         pass
     finally:

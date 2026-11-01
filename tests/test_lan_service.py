@@ -18,8 +18,14 @@ class LANTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(self.service._shutdown)
         self.adapter = LANService(self.service, ['https://zzzccchhh.github.io'])
-        self.a = self.adapter.pair(self.adapter.code, '电脑', '127.0.0.1')['token']
-        self.b = self.adapter.pair(self.adapter.code, '手机', '127.0.0.1')['token']
+        self.a = self.pair('电脑')
+        self.b = self.pair('手机')
+
+    def pair(self, name):
+        request = self.adapter.request_pair(name, '127.0.0.1')
+        self.assertEqual(self.adapter.pairing_status(request['request']), {'state': 'pending'})
+        self.adapter.decide(request['id'], True)
+        return self.adapter.pairing_status(request['request'])['token']
 
     def call(self, token, method, args=None, revision=None):
         return self.adapter.dispatch(token, method, args or [], self.adapter.revision if revision is None else revision)
@@ -34,17 +40,40 @@ class LANTests(unittest.TestCase):
 
     def test_pair_expiry_throttle_and_revocation(self):
         for _ in range(5):
-            with self.assertRaises(ValueError):
-                self.adapter.pair('bad', 'x', '127.0.0.2')
+            self.adapter.request_pair('x', '127.0.0.2')
         with self.assertRaises(ValueError):
-            self.adapter.pair(self.adapter.code, 'x', '127.0.0.2')
+            self.adapter.request_pair('x', '127.0.0.2')
         peer = next(p for p in self.call(self.a, 'peers')['data'] if not p['self'])
         self.call(self.a, 'revoke', [peer['id']])
         with self.assertRaises(PermissionError):
             self.call(self.b, 'poll')
-        self.adapter.code_until = time.monotonic() - 1
+        request = self.adapter.request_pair('x', '127.0.0.3')
+        self.adapter.pending[request['request']]['until'] = time.monotonic() - 1
+        self.assertEqual(self.adapter.pairing_status(request['request'])['state'], 'expired')
         with self.assertRaises(ValueError):
-            self.adapter.pair(self.adapter.code, 'x', '127.0.0.3')
+            self.adapter.decide(request['id'], True)
+
+    def test_pending_cancel_reject_and_secret_isolation(self):
+        request = self.adapter.request_pair('new', '127.0.0.4')
+        self.assertNotIn('token', self.adapter.pairing_status(request['request']))
+        self.assertEqual(self.adapter.pairing_status(request['id'])['state'], 'expired')
+        self.assertNotIn(request['request'], json.dumps(self.adapter.management_snapshot()))
+        self.adapter.pairing_status(request['request'], cancel=True)
+        with self.assertRaises(ValueError):
+            self.adapter.decide(request['id'], True)
+        request = self.adapter.request_pair('new', '127.0.0.4')
+        self.adapter.decide(request['id'], False)
+        self.assertEqual(self.adapter.pairing_status(request['request'])['state'], 'rejected')
+
+    def test_approved_cancel_revokes_token_and_cannot_reapprove(self):
+        request = self.adapter.request_pair('new', '127.0.0.4')
+        self.adapter.decide(request['id'], True)
+        token = self.adapter.pairing_status(request['request'])['token']
+        self.adapter.pairing_status(request['request'], cancel=True)
+        with self.assertRaises(PermissionError):
+            self.call(token, 'poll')
+        with self.assertRaises(ValueError):
+            self.adapter.decide(request['id'], True)
 
     def test_allowlist_and_busy_commands(self):
         with self.assertRaises(ValueError):
@@ -85,11 +114,17 @@ class LANTests(unittest.TestCase):
         with request('/') as response:
             self.assertIn(b'<h1>', response.read())
         for path in ['/../lan_service.py', '/%2e%2e/lan_service.py', '/api/call']:
-            with self.assertRaises(HTTPError):
+            with self.assertRaises(HTTPError) as caught:
                 request(path, {'method': 'poll', 'args': []} if path == '/api/call' else None)
+            caught.exception.close()
         with self.assertRaises(HTTPError) as error:
-            request('/api/pair', {'code': self.adapter.code}, 'https://evil.example')
+            request('/api/pair/request', {'name': 'x'}, 'https://evil.example')
         self.assertEqual(error.exception.code, 403)
+        error.exception.close()
+        for path in ['/api/pair', '/api/pair/approve', '/api/call']:
+            with self.assertRaises(HTTPError) as caught:
+                request(path, {'method': 'decide', 'args': []}, token=self.a)
+            caught.exception.close()
         with request('/api/call', {'method': 'poll', 'args': []}, 'https://zzzccchhh.github.io', self.a) as response:
             self.assertEqual(response.headers['Access-Control-Allow-Origin'], 'https://zzzccchhh.github.io')
             self.assertTrue(json.load(response)['ok'])

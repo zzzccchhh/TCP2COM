@@ -1,0 +1,2 @@
+-r requirements-tcp2com.txt
+qrcode[pil]>=8.0,<9
