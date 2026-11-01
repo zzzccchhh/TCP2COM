@@ -45,7 +45,7 @@ for (const width of [1440, 960, 390]) {
     test(`layout fits ${width}px and all panels remain reachable`, async ({ page }) => {
         await page.setViewportSize({ width, height: 1000 });
         await page.goto('/');
-        await expect(page.getByRole('heading', { name: /无线串口工作台/ })).toBeVisible();
+        await expect(page.getByLabel('当前设备')).toBeVisible();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await page.getByRole('button', { name: '打开配置面板' }).click();
         const dialog = page.getByRole('dialog', { name: '设备配置面板' });

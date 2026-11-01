@@ -268,7 +268,7 @@ export default function App() {
                 <span className="version">DESKTOP / 1.0</span></div>
         </header>
 
-        <section className="page-heading"><div><div className="eyebrow">CONNECT. TRANSFER. OBSERVE.</div><h1>无线串口工作台<span>让每一条连接，清晰可见。</span></h1></div>
+        <section className="page-heading"><div aria-hidden="true" />
             <div className="device-switch"><span>当前设备</span><div className="select-wrap"><select aria-label="当前设备" disabled={waiting} value={device} onChange={e => change('device', e.target.value)}>
                 {Object.entries(labels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
             </select><ChevronDown size={14} /></div></div>
