@@ -15,7 +15,7 @@ from c5_config import C5Client, ConfigError, SaveOutcomeUnknown, changed_config,
 
 
 def example_config():
-    return {"config_source": "nvs", "mode": 0, "link_mode": 1, "band": 0, "baud": 1152000,
+    return {"config_source": "nvs", "mode": 0, "link_mode": 0, "band": 0, "baud": 1152000,
             "tcp_port": 8080, "ap_channel": 6, "ap_ssid": "测试热点", "ap_ip": "192.168.4.1",
             "ap_gateway": "192.168.4.1", "ap_netmask": "255.255.255.0",
             "pc": {"ssid": "PC", "static_ip": True, "ip": "192.168.137.200", "gateway": "192.168.137.1",
@@ -25,7 +25,7 @@ def example_config():
 
 
 def wbr_config(device="c5", **changes):
-    return {**example_config(), "config_api": "c5-wbr-1" if device == "c5" else "bridge-1",
+    return {**example_config(), "link_mode": 4 if device == "c5" else 1, "config_api": "c5-config-2" if device == "c5" else "bridge-1",
             "revision": 23, "saved_revision": 21, "unsaved": False, "migration_requires_setup": False,
             "net_role": 0, "auto_reconnect": True, "remote_ip": "192.168.137.1", "remote_port": 8080,
             "local_port": 6060, "reconnect_ms": 1000, "connect_timeout_ms": 10000,

@@ -72,7 +72,7 @@ def draft_to_config(draft, device):
                     if type(target.get(key)) is int and isinstance(value, str) and value.isascii() and value.isdigit():
                         value = int(value)
                     target[key] = value
-    if device == "c5" and result.get("link_mode") == 2:
+    if device == "c5" and result.get("link_mode") in (1, 2):
         result["link_mode"] = -1
     return result
 

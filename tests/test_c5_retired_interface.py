@@ -11,7 +11,7 @@ class RetiredC5InterfaceTests(unittest.TestCase):
         for extra in ({}, {"flow_pin": 1}):
             with self.assertRaisesRegex(ConfigError, "升级固件"):
                 public_config(wbr_config(link_mode=2, **extra))
-        for mode in (2, -1, True, "2"):
+        for mode in (1, 2, -1, True, "2"):
             with self.assertRaises(ConfigError):
                 validate_patch({"link_mode": mode}, "c5")
         self.assertEqual(public_config(wbr_config(device="s3", link_mode=2), "s3")["link_mode"], 2)
@@ -30,7 +30,7 @@ class RetiredC5InterfaceTests(unittest.TestCase):
         self.assertEqual(changed_config(baseline, draft), {"link_mode": 0, "remote_port": 9000})
 
     def test_state_migration_is_stable_and_does_not_change_s3(self):
-        for old_mode in (2, "2"):
+        for old_mode in (1, "1", 2, "2"):
             old = {"version": 1, "device_drafts": {
                 "c5": {"common": {"link_mode": old_mode, "remote_port": "9000"}},
                 "s3": {"common": {"link_mode": 2}}}}

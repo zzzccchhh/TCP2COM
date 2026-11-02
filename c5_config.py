@@ -23,7 +23,7 @@ TOP_FIELDS = ("link_mode", "mode", "band", "baud", "tcp_port", "ap_channel",
               "ap_ssid", "ap_ip", "ap_gateway", "ap_netmask")
 NETWORK_FIELDS = ("net_role", "auto_reconnect", "remote_ip", "remote_port", "local_port",
                   "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb")
-CONFIG_APIS = {"c5": "c5-wbr-1", "s3": "bridge-1"}
+CONFIG_APIS = {"c5": ("c5-config-2", "c5-wbr-1"), "s3": ("bridge-1",)}
 STATION_FIELDS = ("ssid", "static_ip", "ip", "gateway", "netmask", "dns")
 
 
@@ -46,7 +46,7 @@ def public_config(document, device="c5"):
             result[key] = copy.deepcopy(document[key])
     api = document.get("config_api")
     if api is not None:
-        if api != CONFIG_APIS.get(device):
+        if api not in CONFIG_APIS.get(device, ()):
             raise ConfigError("设备配置接口与所选型号不匹配或版本不支持，请重新选择并读取")
         if "revision" not in document or any(key not in document for key in NETWORK_FIELDS):
             raise ConfigError("新固件配置缺少修订号或网络字段，请重新读取并检查固件版本")
@@ -67,10 +67,13 @@ def public_config(document, device="c5"):
 
 def public_draft_config(document, device="c5"):
     """Import old C5 backups as an unselected draft, never as a live config."""
-    if device == "c5" and isinstance(document, dict) and type(document.get("link_mode")) is int and document["link_mode"] == 2:
-        # Validate the other fields using a legal interface, then explicitly
-        # mark the selection invalid. No save path accepts this sentinel.
-        result = public_config({**document, "link_mode": 0}, device)
+    if device == "c5" and isinstance(document, dict) and type(document.get("link_mode")) is int and document["link_mode"] in (1, 2):
+        # Old SPI stored reset choices were inactive (including on port 8081).
+        # Validate that draft with SPI semantics, retaining all dormant values.
+        # The sentinel prevents saving before a real interface is selected;
+        # normal save validation then applies that interface's constraints.
+        preview_link = 4 if document["link_mode"] == 1 else 0
+        result = public_config({**document, "link_mode": preview_link}, device)
         result["link_mode"] = -1
         return result
     return public_config(document, device)
@@ -114,9 +117,9 @@ def _network(ip, gateway, netmask, ap=False):
 
 
 def _validate_link_mode(value, device):
-    if device == "c5" and type(value) is int and value == 2:
-        raise ConfigError("C5 旧模式 2 已移除，请升级固件后重新读取设备")
-    allowed_links = (0, 1, 3) if device == "c5" else (0, 1, 2)
+    if device == "c5" and type(value) is int and value in (1, 2):
+        raise ConfigError("C5 旧 SPI/UART WBR 模式已移除，请升级固件后重新读取设备")
+    allowed_links = (0, 3, 4) if device == "c5" else (0, 1, 2)
     if type(value) is not int or value not in allowed_links:
         raise ConfigError("请选择当前设备支持的业务接口")
 
@@ -137,7 +140,7 @@ def validate_config(config, device="c5"):
             raise ConfigError("流控线不能与复位线相同")
     if "reset_pin" in config and (device not in ("c5", "s3") or type(config["reset_pin"]) is not int or not 0 <= config["reset_pin"] <= 4):
         raise ConfigError("复位线必须为 0～4")
-    if config.get("reset_pin", 0) and config["link_mode"] != 1 and (
+    if config.get("reset_pin", 0) and config["link_mode"] != (4 if device == "c5" else 1) and (
             (config.get("net_role", 0) == 0 and config["tcp_port"] == 8081) or
             (config.get("net_role", 0) == 1 and config.get("local_port") == 8081)):
         raise ConfigError("复位控制 TCP 端口 8081 与业务端口冲突")
@@ -198,6 +201,8 @@ def changed_config(baseline, edited, passwords=None, clear_passwords=(), device=
         else:
             candidate[name]["password"] = value
     validate_config(candidate, device)
+    if device == "c5" and candidate["link_mode"] == 4 and base.get("config_api") != "c5-config-2":
+        raise ConfigError("四线 SPI 需要升级 C5 固件并重新读取设备")
     if device == "s3" and candidate["link_mode"] == 0 and base["link_mode"] != 0 and "reset_pin" not in base:
         raise ConfigError("无法确认旧版 S3 固件支持原始串口，请更新固件并重新读取")
     patch = {key: candidate[key] for key in TOP_FIELDS + NETWORK_FIELDS + ("reset_pin", "flow_pin")
@@ -230,6 +235,8 @@ def validate_patch(patch, device, baseline=None):
             type(patch["ap_channel"]) is not int or not 1 <= patch["ap_channel"] <= 13):
         raise ConfigError("S3 的 2.4 GHz 信道必须为 1～13")
     if baseline is not None:
+        if device == "c5" and patch.get("link_mode", baseline.get("link_mode")) == 4 and baseline.get("config_api") != "c5-config-2":
+            raise ConfigError("四线 SPI 需要升级 C5 固件并重新读取设备")
         if "flow_pin" in patch and (device != "c5" or "flow_pin" not in baseline):
             raise ConfigError("设备未报告流控配置，请更新固件并重新读取")
         if "reset_pin" in patch and "reset_pin" not in baseline:

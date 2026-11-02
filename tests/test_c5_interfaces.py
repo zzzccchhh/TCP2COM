@@ -18,7 +18,7 @@ from usb_diagnostics import USBMonitor, parse_stats
 
 class CurrentC5ModelTests(unittest.TestCase):
     def test_three_links_and_three_roles_preserve_all_new_fields_and_status(self):
-        for link in (0, 1, 3):
+        for link in (0, 4, 3):
             for role in range(3):
                 document = config_tests.wbr_config(link_mode=link, flow_pin=1, net_role=role)
                 result = public_config(document)
@@ -139,7 +139,7 @@ class CurrentC5USBTests(unittest.TestCase):
         baseline = C5USBClient(self.monitor, device="c5").read()
         client = C5USBClient(self.monitor, device="c5")
         client.baseline = baseline
-        patch = dict(link_mode=1, net_role=1, remote_port=9000, up_kb=2048)
+        patch = dict(link_mode=4, net_role=1, remote_port=9000, up_kb=2048)
         client.save(patch)
         self.assertEqual(self.device.save_count, 1)
         self.assertEqual([r["patch"] for r in self.device.requests[-2:]], [{**patch, "revision": 23}] * 2)

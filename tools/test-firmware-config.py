@@ -16,7 +16,7 @@ import time
 from unittest import mock
 
 
-def run_pair(args, link_mode=1, net_role=0, drop_save=False):
+def run_pair(args, link_mode=4, net_role=0, drop_save=False):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from c5_usb_config import C5USBClient as NativeUSBClient
     def C5USBClient(monitor, timeout=4):
@@ -79,7 +79,7 @@ def run_pair(args, link_mode=1, net_role=0, drop_save=False):
             config = client.read()
             assert config["config_source"] == "defaults"
             if args.device == "c5":
-                assert config["config_api"] == "c5-wbr-1" and config["revision"] > 0
+                assert config["config_api"] == "c5-config-2" and config["revision"] > 0
                 assert config["saved_revision"] == 0 and not config["unsaved"]
                 assert not config["migration_requires_setup"]
             # Exit/re-enter setup without resetting the process/boot identifier.
@@ -125,11 +125,11 @@ def run_pair(args, link_mode=1, net_role=0, drop_save=False):
                                             session=client.identity[4])
                     assert frame["ok"] is False and frame["code"] == "invalid"
                 assert client.read()["band"] == 0
-            patch = {"baud": 921600, "link_mode": 1, "mode": 2,
+            patch = {"baud": 921600, "link_mode": 4, "mode": 2,
                      "shared": {"ssid": "USB-pair-test", "password": "pair-test-secret", "static_ip": False}}
             if args.device == "c5":
                 if "reset_pin" in config:
-                    patch["reset_pin"] = link_mode + 1
+                    patch["reset_pin"] = (0, 4, 3).index(link_mode) + 1
                 band, channel = ((0, 6), (1, 36), (2, 6))[net_role]
                 if "flow_pin" in config:
                     patch["flow_pin"] = 1
@@ -170,7 +170,7 @@ def main():
     parser.add_argument("--fixture", type=Path, required=True)
     args = parser.parse_args()
     if args.device == "c5":
-        for net_role, link_mode in enumerate((0, 1, 3)):
+        for net_role, link_mode in enumerate((0, 4, 3)):
             run_pair(args, link_mode=link_mode, net_role=net_role)
         run_pair(args, link_mode=3, net_role=2, drop_save=True)
     else:

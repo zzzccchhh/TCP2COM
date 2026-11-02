@@ -272,7 +272,9 @@ test('new C5 exposes GPIO flow mode and pin without changing S3 options', async 
     const panel = page.getByRole('dialog', { name: '设备配置面板' });
     await panel.getByRole('button', { name: '读取设备', exact: true }).click();
     const mode = panel.getByLabel('MCU 接口', { exact: true });
-    await expect(mode.locator('option')).toHaveText(['UART 原始透传', 'SPI WBR/1', 'UART GPIO 流控透传']);
+    await expect(mode.locator('option')).toHaveText(['UART 原始透传', '四线 SPI 简易写入', 'UART GPIO 流控透传']);
+    await mode.selectOption('4');
+    await expect(panel.getByText('四线 SPI 仅发送 MCU 数据到网络', { exact: false })).toBeVisible();
     await mode.selectOption('3');
     await panel.getByLabel('串口流控线（高暂停 / 低允许）', { exact: true }).selectOption('4');
     await panel.getByRole('button', { name: '保存并重启', exact: true }).click();

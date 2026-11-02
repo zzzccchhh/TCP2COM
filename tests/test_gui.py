@@ -349,10 +349,10 @@ class GUITests(unittest.TestCase):
         self.gui.read_c5()
         wait_for(lambda: self.gui.baseline is not None, self.root.update)
         form = self.gui.c5_forms["common"]
-        self.assertEqual(set(form.options["link_mode"].values()), {-1, 0, 1, 3})
+        self.assertEqual(set(form.options["link_mode"].values()), {-1, 0, 4, 3})
         self.assertNotIn("逐飞", str(form.options["link_mode"]))
         self.assertIn("编辑修订 23", self.gui.c5_status.get())
-        patch = dict(link_mode=1, band=1, net_role=2, remote_ip="192.168.137.100",
+        patch = dict(link_mode=4, band=1, net_role=2, remote_ip="192.168.137.100",
                      remote_port=9000, local_port=0, auto_reconnect=False,
                      reconnect_ms=2000, connect_timeout_ms=5000, up_kb=2048, down_kb=512)
         for key, value in patch.items():
@@ -546,7 +546,7 @@ class GUITests(unittest.TestCase):
         self.gui.c5_forms["shared"].set("clear_password", True)
         with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True), mock.patch.object(self.gui, "_http") as http:
             self.gui.save_c5()
-        http.assert_called_once_with("save", {"link_mode": 0, "shared": {"password": ""}})
+        http.assert_called_once_with("save", {"shared": {"password": ""}})
 
     def test_http_worker_updates_main_thread_and_unknown_invalidates_baseline(self):
         with mock.patch("c5_config.C5Client.read", return_value=example_config()):

@@ -34,7 +34,7 @@ ESP_LEVEL = re.compile(r"^\s*([EWIDV])\s+\(\s*\d+\s*\)")
 def payload_interfaces(device):
     if device == "c5":
         return {"请选择接口（旧接口已移除）": -1, "UART 原始透传": 0,
-                "SPI WBR/1": 1, "UART GPIO 流控透传": 3}
+                "四线 SPI 简易写入": 4, "UART GPIO 流控透传": 3}
     return {"UART 原始透传": 0, "SPI WBR/1": 1, "UART WBR/1": 2}
 
 
@@ -462,7 +462,7 @@ class BridgeGUI:
                     continue
                 for key, value in fields.items():
                     if key in DRAFT_FIELDS[group] and key in self.c5_forms[group].variables:
-                        if group == "common" and key == "link_mode" and self.network.get("device") == "c5" and value == 2:
+                        if group == "common" and key == "link_mode" and self.network.get("device") == "c5" and value in (1, 2):
                             value = -1
                         self.c5_forms[group].set(key, value)
             self._clear_passwords()
