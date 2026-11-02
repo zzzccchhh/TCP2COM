@@ -17,7 +17,7 @@ FORM_FIELDS = {
     "usb_form": ("usb_port", "usb_baud", "usb_log"),
 }
 DRAFT_FIELDS = {
-    "common": ("link_mode", "reset_pin", "mode", "band", "baud", "tcp_port", "net_role", "auto_reconnect",
+    "common": ("link_mode", "flow_pin", "reset_pin", "mode", "band", "baud", "tcp_port", "net_role", "auto_reconnect",
                "remote_ip", "remote_port", "local_port", "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb"),
     "ap": ("ap_ssid", "ap_channel", "ap_ip", "ap_gateway", "ap_netmask"),
     "pc": ("ssid", "static_ip", "ip", "gateway", "netmask", "dns"),
@@ -30,7 +30,8 @@ CHOICES = {
     ("local", "parity"): ("N", "E", "O", "M", "S"),
     ("local", "stopbits"): ("1", "1.5", "2"),
     ("local", "flow"): ("none", "rtscts", "dsrdtr"),
-    ("common", "link_mode"): (0, 1, 2),
+    ("common", "link_mode"): (0, 1, 2, 3),
+    ("common", "flow_pin"): (0, 1, 2, 3, 4),
     ("common", "reset_pin"): (0, 1, 2, 3, 4),
     ("common", "mode"): (0, 1, 2),
     ("common", "band"): (0, 1, 2),
@@ -52,6 +53,10 @@ def _group(document, fields, group, warnings, device=None):
         choices = CHOICES.get((group, key))
         if choices:
             valid = type(value) is type(choices[0]) and value in choices
+            if key == "flow_pin" and device != "c5":
+                valid = False
+            if key == "link_mode" and device != "c5" and value == 3:
+                valid = False
             if device == "s3" and key == "band":
                 valid = valid and value == 0
         elif key in BOOLEANS:

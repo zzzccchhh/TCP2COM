@@ -426,6 +426,24 @@ class GUITests(unittest.TestCase):
         self.assertEqual(self.gui.c5_forms["common"].get("link_mode"), 2)
         self.assertIsNone(self.gui.baseline)
 
+    def test_c5_gpio_flow_read_edit_and_recovery_save(self):
+        document = wbr_config(link_mode=3, flow_pin=2, reset_pin=0, migration_requires_setup=True)
+        client = C5Client(self.gui.config_url.get())
+        client.bind_session("0123456789abcdef-1")
+        context = (self.gui.context_epoch, "c5")
+        self.gui.http_events.put(("read", client.identity, document, None, context))
+        self.gui._http_results()
+        form = self.gui.c5_forms["common"]
+        self.assertEqual(form.get("link_mode"), 3)
+        self.assertEqual(form.get("flow_pin"), 2)
+        self.assertNotIn(2, form.options["link_mode"].values())
+        form.set("flow_pin", 4)
+        with mock.patch("tcp2com_gui.messagebox.askokcancel", return_value=True), \
+                mock.patch.object(self.gui, "_http") as request:
+            self.gui.save_c5()
+        request.assert_called_once_with("save", {"link_mode": 3, "flow_pin": 4})
+        self.assertEqual(self.gui.edited_c5()["flow_pin"], 4)
+
     def test_c5_recovery_and_unsaved_runtime_values_allow_explicit_no_delta_save(self):
         # Preserve the current read identity while simulating each firmware status.
         for status in ("migration_requires_setup", "unsaved"):

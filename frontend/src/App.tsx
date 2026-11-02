@@ -261,7 +261,10 @@ export default function App() {
 
     const field = (key: string, label: string, extra: Partial<FieldProps> = {}) => <Field key={key} label={label}
         value={settings[key]} onChange={value => change(key, value)} {...extra} />;
-    const optional = ['reset_pin', 'net_role', 'auto_reconnect', 'remote_ip', 'remote_port', 'local_port', 'reconnect_ms', 'connect_timeout_ms', 'up_kb', 'down_kb'];
+    const linkOptions: [number, string][] = [[0, 'UART 原始透传'], [1, 'SPI WBR/1']];
+    if (device === 'c5' && (!snap.baseline || 'flow_pin' in snap.baseline)) linkOptions.push([3, 'UART GPIO 流控透传']);
+    if (device !== 'c5' || !snap.baseline || !('flow_pin' in snap.baseline)) linkOptions.push([2, 'UART WBR/1']);
+    const optional = ['flow_pin', 'reset_pin', 'net_role', 'auto_reconnect', 'remote_ip', 'remote_port', 'local_port', 'reconnect_ms', 'connect_timeout_ms', 'up_kb', 'down_kb'];
     const cf = (key: string, label: string, extra: Partial<FieldProps> = {}, group?: string) => <Field key={`${group || ''}${key}`} label={label}
         value={group ? config[group]?.[key] : config[key]} onChange={value => editConfig(key, value, group)}
         disabled={working || snap.config_busy || (!!snap.baseline && optional.includes(key) && !(key in snap.baseline))} {...extra} />;
@@ -383,7 +386,7 @@ export default function App() {
                     {caps ? <><div className="segmented transport-switch">{[['usb', 'USB 配置'], ['http', 'Wi-Fi / HTTP']].map(([value, label]) => <button key={value} disabled={waiting} className={settings.config_transport === value ? 'selected' : ''} onClick={() => change('config_transport', value)}>{label}</button>)}</div>
                         {settings.config_transport === 'http' && <div className="http-field">{field('config_url', '设备配置地址', { disabled: waiting })}</div>}
                         <div className="device-read-state"><span className={`status-dot ${snap.baseline ? 'online' : ''}`} />{snap.baseline ? `已读取 · 修订 ${snap.baseline.revision ?? '—'}` : '尚未读取设备配置'}</div>
-                        <div className="device-facts"><div><span>业务接口</span><strong>{snap.baseline ? ['UART 透传', 'SPI WBR/1', 'UART WBR/1'][snap.baseline.link_mode] : '—'}</strong></div><div><span>联网模式</span><strong>{snap.baseline ? ['自建热点 AP', '电脑热点 STA', '共享 Wi-Fi STA'][snap.baseline.mode] : '—'}</strong></div></div>
+                        <div className="device-facts"><div><span>业务接口</span><strong>{snap.baseline ? ['UART 透传', 'SPI WBR/1', 'UART WBR/1', 'UART GPIO 流控透传'][snap.baseline.link_mode] : '—'}</strong></div><div><span>联网模式</span><strong>{snap.baseline ? ['自建热点 AP', '电脑热点 STA', '共享 Wi-Fi STA'][snap.baseline.mode] : '—'}</strong></div></div>
                         <button className="button secondary full" disabled={waiting} onClick={() => run(readConfig)}>{working ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}读取设备配置</button>
                         <button className="button full" onClick={() => setDrawer('config')}><SlidersHorizontal size={14} />打开配置面板<ArrowRight size={14} /></button>
                         <p className="setup-note"><Info size={12} /><span>配网：{device === 'c5' ? 'Key' : 'GPIO4'} 长按 3 秒进入配网。</span></p>
@@ -414,7 +417,8 @@ export default function App() {
                     <div className="segmented config-tabs">{[['common', '接口与联网'], ['ap', '自建热点'], ['pc', '电脑热点'], ['shared', '共享 Wi-Fi']].map(([value, label]) => <button key={value} className={configTab === value ? 'selected' : ''} onClick={() => setConfigTab(value)}>{label}</button>)}</div>
                     {configTab === 'common' ? <div className="config-sections">
                         <div className="config-section"><h3>业务接口</h3><div className="form-grid">
-                            {cf('link_mode', 'MCU 接口', { numeric: true, options: [[0, 'UART 原始透传'], [1, 'SPI WBR/1'], [2, 'UART WBR/1']] })}
+                            {cf('link_mode', 'MCU 接口', { numeric: true, options: linkOptions })}
+                            {device === 'c5' && cf('flow_pin', '串口流控线（高暂停 / 低允许）', { numeric: true, options: [[0, '未选择'], [1, 'SCK / GPIO23'], [2, 'MOSI / GPIO10'], [3, 'MISO / GPIO9'], [4, 'CS / GPIO5']] })}
                             {cf('baud', '设备 UART 波特率 / bps', { numeric: true })}
                             {device !== 'esp01s' && cf('reset_pin', '外部主控复位线', { numeric: true, options: [[0, '关闭'], [1, `SCK / GPIO${device === 's3' ? 18 : 23}`], [2, 'MOSI / GPIO10'], [3, 'MISO / GPIO9'], [4, 'CS / GPIO5']] })}
                         </div></div>

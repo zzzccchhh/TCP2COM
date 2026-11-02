@@ -130,7 +130,9 @@ def run_pair(args, link_mode=1, net_role=0, drop_save=False):
             if args.device == "c5":
                 if "reset_pin" in config:
                     patch["reset_pin"] = link_mode + 1
-                band, channel = ((0, 6), (1, 36), (2, 6))[link_mode]
+                band, channel = ((0, 6), (1, 36), (2, 6))[net_role]
+                if "flow_pin" in config:
+                    patch["flow_pin"] = 1
                 patch.update(link_mode=link_mode, band=band, ap_channel=channel, net_role=net_role,
                              auto_reconnect=False, remote_ip="192.168.137.99", remote_port=9000,
                              local_port=0, reconnect_ms=2000, connect_timeout_ms=5000,
@@ -168,9 +170,9 @@ def main():
     parser.add_argument("--fixture", type=Path, required=True)
     args = parser.parse_args()
     if args.device == "c5":
-        for link_mode in range(3):
-            run_pair(args, link_mode=link_mode, net_role=link_mode)
-        run_pair(args, link_mode=2, net_role=2, drop_save=True)
+        for net_role, link_mode in enumerate((0, 1, 3)):
+            run_pair(args, link_mode=link_mode, net_role=net_role)
+        run_pair(args, link_mode=3, net_role=2, drop_save=True)
     else:
         run_pair(args)
 

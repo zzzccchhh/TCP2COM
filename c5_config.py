@@ -39,6 +39,8 @@ def public_config(document, device="c5"):
         raise ConfigError("配置缺少必要字段，请检查固件版本") from exc
     if device in ("c5", "s3") and "reset_pin" in document:
         result["reset_pin"] = copy.deepcopy(document["reset_pin"])
+    if device == "c5" and "flow_pin" in document:
+        result["flow_pin"] = copy.deepcopy(document["flow_pin"])
     for key in NETWORK_FIELDS:
         if key in document:
             result[key] = copy.deepcopy(document[key])
@@ -101,10 +103,20 @@ def _network(ip, gateway, netmask, ap=False):
 
 
 def validate_config(config, device="c5"):
-    for key, low, high in (("link_mode", 0, 2), ("mode", 0, 2), ("band", 0, 2),
+    for key, low, high in (("link_mode", 0, 3 if device == "c5" else 2), ("mode", 0, 2), ("band", 0, 2),
                            ("baud", 9600, 5000000), ("tcp_port", 1024, 65535), ("ap_channel", 1, 165)):
         if type(config.get(key)) is not int or not low <= config[key] <= high:
             raise ConfigError(f"{key} 必须为 {low}～{high} 的整数")
+    if "flow_pin" in config:
+        if device != "c5" or type(config["flow_pin"]) is not int or not 0 <= config["flow_pin"] <= 4:
+            raise ConfigError("流控线必须为 0～4，且仅适用于 C5")
+        if config["link_mode"] == 2:
+            raise ConfigError("此 C5 固件已移除 UART WBR/1，请选择透传或 SPI")
+    if config["link_mode"] == 3:
+        if device != "c5" or not config.get("flow_pin"):
+            raise ConfigError("GPIO 流控模式需要新版 C5 固件，并选择流控线")
+        if config["flow_pin"] == config.get("reset_pin", 0):
+            raise ConfigError("流控线不能与复位线相同")
     if "reset_pin" in config and (device not in ("c5", "s3") or type(config["reset_pin"]) is not int or not 0 <= config["reset_pin"] <= 4):
         raise ConfigError("复位线必须为 0～4")
     if config.get("reset_pin", 0) and config["link_mode"] != 1 and (
@@ -170,8 +182,14 @@ def changed_config(baseline, edited, passwords=None, clear_passwords=(), device=
     validate_config(candidate, device)
     if device == "s3" and candidate["link_mode"] == 0 and base["link_mode"] != 0 and "reset_pin" not in base:
         raise ConfigError("无法确认旧版 S3 固件支持原始串口，请更新固件并重新读取")
-    patch = {key: candidate[key] for key in TOP_FIELDS + NETWORK_FIELDS + ("reset_pin",)
+    patch = {key: candidate[key] for key in TOP_FIELDS + NETWORK_FIELDS + ("reset_pin", "flow_pin")
              if key in candidate and candidate[key] != base.get(key)}
+    if device == "c5" and "flow_pin" in candidate and "flow_pin" not in base:
+        raise ConfigError("设备未报告流控配置，请更新固件并重新读取")
+    if device == "c5" and "flow_pin" in base and base.get("migration_requires_setup"):
+        patch["link_mode"] = candidate["link_mode"]
+        if candidate["link_mode"] == 3:
+            patch["flow_pin"] = candidate["flow_pin"]
     if "ap_password" in candidate:
         patch["ap_password"] = candidate["ap_password"]
     for name in ("pc", "shared"):
@@ -192,6 +210,8 @@ def validate_patch(patch, device, baseline=None):
             type(patch["ap_channel"]) is not int or not 1 <= patch["ap_channel"] <= 13):
         raise ConfigError("S3 的 2.4 GHz 信道必须为 1～13")
     if baseline is not None:
+        if "flow_pin" in patch and (device != "c5" or "flow_pin" not in baseline):
+            raise ConfigError("设备未报告流控配置，请更新固件并重新读取")
         if "reset_pin" in patch and "reset_pin" not in baseline:
             raise ConfigError("设备未报告复位配置，请更新固件后重新读取")
         if device == "s3" and patch.get("link_mode") == 0 and "reset_pin" not in baseline:

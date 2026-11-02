@@ -263,3 +263,26 @@ test('desktop keeps main controls and metrics in the first screen', async ({ pag
     await expect(page.getByRole('button', { name: '启动桥接' })).toBeInViewport();
     await expect(page.getByRole('button', { name: '打开配置面板' })).toBeInViewport();
 });
+
+
+test('new C5 exposes GPIO flow mode and pin without changing S3 options', async ({ page }) => {
+    await installBridge(page);
+    await page.goto('/');
+    await page.getByRole('button', { name: '打开配置面板' }).click();
+    const panel = page.getByRole('dialog', { name: '设备配置面板' });
+    await panel.getByRole('button', { name: '读取设备', exact: true }).click();
+    const mode = panel.getByLabel('MCU 接口', { exact: true });
+    await expect(mode.locator('option')).toHaveText(['UART 原始透传', 'SPI WBR/1', 'UART GPIO 流控透传']);
+    await mode.selectOption('3');
+    await panel.getByLabel('串口流控线（高暂停 / 低允许）', { exact: true }).selectOption('4');
+    await panel.getByRole('button', { name: '保存并重启', exact: true }).click();
+    const preview = await page.evaluate(() => (window as any).__calls.findLast((row: any[]) => row[0] === 'preview_save'));
+    expect(preview[1].link_mode).toBe(3);
+    expect(preview[1].flow_pin).toBe(4);
+    await page.getByRole('dialog', { name: '确认保存设备配置' }).getByRole('button', { name: '取消', exact: true }).click();
+    await panel.getByRole('button', { name: '关闭面板' }).click();
+    await page.getByLabel('当前设备', { exact: true }).selectOption('s3');
+    await page.getByRole('button', { name: '打开配置面板' }).click();
+    await expect(panel.getByLabel('串口流控线（高暂停 / 低允许）', { exact: true })).toHaveCount(0);
+    await expect(panel.getByLabel('MCU 接口', { exact: true }).locator('option')).toHaveText(['UART 原始透传', 'SPI WBR/1', 'UART WBR/1']);
+});

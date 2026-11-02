@@ -48,6 +48,8 @@ def default_device_config(device):
               "up_kb": 4096, "down_kb": 1024, "pc": copy.deepcopy(station), "shared": copy.deepcopy(station)}
     if device in ("c5", "s3"):
         result["reset_pin"] = 0
+    if device == "c5":
+        result["flow_pin"] = 1
     return result
 
 
@@ -332,7 +334,7 @@ class WebService:
         if self._baseline is None or self._identity != client.identity:
             raise ConfigError("请先从当前连接读取设备，之后才能保存")
         candidate = copy.deepcopy(edited)
-        for key in ("reset_pin", "net_role", "auto_reconnect", "remote_ip", "remote_port", "local_port",
+        for key in ("flow_pin", "reset_pin", "net_role", "auto_reconnect", "remote_ip", "remote_port", "local_port",
                     "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb"):
             if key not in self._baseline:
                 candidate.pop(key, None)

@@ -358,6 +358,7 @@ class BridgeGUI:
         form = self.c5_forms["common"]
         form.note("新固件读取当前运行配置；临时应用值可能尚未保存。明确保存后写 NVS 并重启，业务连接会断开。")
         form.add("link_mode", "设备业务接口", 0, {"UART 原始透传": 0, "SPI WBR/1": 1, "UART WBR/1": 2})
+        form.add("flow_pin", "串口流控线（高暂停 / 低允许）", 1, {"未选择": 0, "SCK GPIO23": 1, "MOSI GPIO10": 2, "MISO GPIO9": 3, "CS GPIO5": 4})
         form.add("reset_pin", "外部复位线（仅串口模式）", 0, {"关闭": 0, "SCK GPIO23": 1, "MOSI GPIO10": 2, "MISO GPIO9": 3, "CS GPIO5": 4})
         form.add("mode", "设备 Wi-Fi 联网模式", 0, {"自建热点 AP": 0, "连接电脑热点": 1, "连接共享 Wi-Fi": 2})
         form.add("band", "频段", 0, {"2.4 GHz": 0, "5 GHz": 1, "自动（AP 使用 2.4 GHz）": 2})
@@ -425,8 +426,11 @@ class BridgeGUI:
             self._device_loading = previous
 
     def _device_values(self):
-        return {group: {key: form.get(key) for key in DRAFT_FIELDS[group] if key in form.variables}
-                for group, form in self.c5_forms.items()}
+        result = {group: {key: form.get(key) for key in DRAFT_FIELDS[group] if key in form.variables}
+                  for group, form in self.c5_forms.items()}
+        if self.network.get("device") != "c5":
+            result["common"].pop("flow_pin", None)
+        return result
 
     def _remember_device_draft(self, only_if_missing=False):
         if self._state_loading or self._device_loading or self.closing:
@@ -606,9 +610,25 @@ class BridgeGUI:
         self.network.widgets["device"].configure(state="disabled" if self.http_busy else "readonly")
         self.draft_button.configure(state="normal" if enabled and self.network.get("device") in self._device_drafts
                                     else "disabled")
-        for key in ("reset_pin","net_role","auto_reconnect","remote_ip","remote_port","local_port",
+        for key in ("flow_pin","reset_pin","net_role","auto_reconnect","remote_ip","remote_port","local_port",
                     "reconnect_ms","connect_timeout_ms","up_kb","down_kb"):
             self.c5_forms["common"].enable(key,enabled and self.baseline is not None and key in self.baseline)
+        form = self.c5_forms["common"]
+        new_c5 = self.network.get("device") == "c5" and self.baseline is not None and "flow_pin" in self.baseline
+        links = {"UART 原始透传": 0, "SPI WBR/1": 1, **({"UART GPIO 流控透传": 3} if new_c5 else {"UART WBR/1": 2})}
+        if self.network.get("device") == "c5" and self.baseline is None:
+            links["UART GPIO 流控透传"] = 3
+        try:
+            current = form.get("link_mode")
+        except ValueError:
+            current = 3 if form.variables["link_mode"].get() == "3" else 0
+        if form.options["link_mode"] != links:
+            form.options["link_mode"] = links
+            form.widgets["link_mode"].configure(values=list(links))
+            with self._pause_device():
+                if current not in links.values():
+                    current = self.baseline.get("link_mode", 0) if self.baseline else 0
+                form.set("link_mode", current)
         self._c5_changes()
 
     def _c5_changes(self):
@@ -767,6 +787,11 @@ class BridgeGUI:
                 self.c5_forms[name].set("clear_password", False)
 
     def _fill_c5(self, document):
+        form = self.c5_forms["common"]
+        new_c5 = self.network.get("device") == "c5" and "flow_pin" in document
+        form.options["link_mode"] = {"UART 原始透传": 0, "SPI WBR/1": 1,
+                                     **({"UART GPIO 流控透传": 3} if new_c5 else {"UART WBR/1": 2})}
+        form.widgets["link_mode"].configure(values=list(form.options["link_mode"]))
         with self._pause_device():
             for name in ("common", "ap"):
                 form = self.c5_forms[name]
@@ -784,6 +809,8 @@ class BridgeGUI:
 
     def edited_c5(self):
         result = self.c5_forms["common"].values()
+        if self.network.get("device") != "c5" or not self.baseline or "flow_pin" not in self.baseline:
+            result.pop("flow_pin", None)
         if self.network.get("device") not in ("c5", "s3") or not self.baseline or "reset_pin" not in self.baseline:
             result.pop("reset_pin", None)
         for key in ("baud", "tcp_port", "remote_port", "local_port", "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb"):
@@ -800,7 +827,7 @@ class BridgeGUI:
             result[name] = {key: value for key, value in self.c5_forms[name].values().items()
                             if key not in ("password", "clear_password")}
         if self.baseline is not None:
-            for key in ("reset_pin","net_role","auto_reconnect","remote_ip","remote_port","local_port",
+            for key in ("flow_pin","reset_pin","net_role","auto_reconnect","remote_ip","remote_port","local_port",
                         "reconnect_ms","connect_timeout_ms","up_kb","down_kb"):
                 if key not in self.baseline:
                     result.pop(key,None)
@@ -896,7 +923,8 @@ class BridgeGUI:
             if document.get("unsaved"):
                 detail += " · 当前运行值尚未保存"
             if document.get("migration_requires_setup"):
-                detail += " · 旧 SPI 恢复：业务接口已停用，请明确选择新接口后保存重启"
+                removed = "旧业务接口恢复" if "flow_pin" in document else "旧 SPI 恢复"
+                detail += f" · {removed}：业务接口已停用，请明确选择新接口后保存重启"
             self.c5_status.set(f"已读取配置 · {detail} · {time.strftime('%H:%M:%S')}；修改后需明确保存")
         else:
             self.baseline = self.read_identity = None
