@@ -30,7 +30,7 @@ CHOICES = {
     ("local", "parity"): ("N", "E", "O", "M", "S"),
     ("local", "stopbits"): ("1", "1.5", "2"),
     ("local", "flow"): ("none", "rtscts", "dsrdtr"),
-    ("common", "link_mode"): (0, 1, 2, 3),
+    ("common", "link_mode"): (-1, 0, 1, 2, 3),
     ("common", "flow_pin"): (0, 1, 2, 3, 4),
     ("common", "reset_pin"): (0, 1, 2, 3, 4),
     ("common", "mode"): (0, 1, 2),
@@ -50,12 +50,16 @@ def _group(document, fields, group, warnings, device=None):
         if key not in document:
             continue
         value = document[key]
+        if device == "c5" and key == "link_mode" and value in (2, "2"):
+            result[key] = -1
+            warnings.append("common.link_mode（旧接口已移除，请重新选择）")
+            continue
         choices = CHOICES.get((group, key))
         if choices:
             valid = type(value) is type(choices[0]) and value in choices
             if key == "flow_pin" and device != "c5":
                 valid = False
-            if key == "link_mode" and device != "c5" and value == 3:
+            if key == "link_mode" and device != "c5" and value in (-1, 3):
                 valid = False
             if device == "s3" and key == "band":
                 valid = valid and value == 0

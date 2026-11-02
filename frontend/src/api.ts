@@ -53,6 +53,7 @@ export function applyDraft(base: Data, draft: Data, device: string): Data {
             result[key] = typeof schema[key] === 'number' && typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
         });
     });
+    if (device === 'c5' && Number(result.link_mode) === 2) result.link_mode = -1;
     return result;
 }
 

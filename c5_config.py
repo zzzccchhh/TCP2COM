@@ -65,6 +65,17 @@ def public_config(document, device="c5"):
     return result
 
 
+def public_draft_config(document, device="c5"):
+    """Import old C5 backups as an unselected draft, never as a live config."""
+    if device == "c5" and isinstance(document, dict) and type(document.get("link_mode")) is int and document["link_mode"] == 2:
+        # Validate the other fields using a legal interface, then explicitly
+        # mark the selection invalid. No save path accepts this sentinel.
+        result = public_config({**document, "link_mode": 0}, device)
+        result["link_mode"] = -1
+        return result
+    return public_config(document, device)
+
+
 def _text(value, label, maximum, minimum=0):
     if not isinstance(value, str) or "\0" in value or not minimum <= len(value.encode("utf-8")) <= maximum:
         raise ConfigError(f"{label} 长度应为 {minimum}～{maximum} 个 UTF-8 字节，不能含 NUL")
@@ -102,16 +113,23 @@ def _network(ip, gateway, netmask, ap=False):
         raise ConfigError("STA IP 不能与网关相同")
 
 
+def _validate_link_mode(value, device):
+    if device == "c5" and type(value) is int and value == 2:
+        raise ConfigError("C5 旧模式 2 已移除，请升级固件后重新读取设备")
+    allowed_links = (0, 1, 3) if device == "c5" else (0, 1, 2)
+    if type(value) is not int or value not in allowed_links:
+        raise ConfigError("请选择当前设备支持的业务接口")
+
+
 def validate_config(config, device="c5"):
-    for key, low, high in (("link_mode", 0, 3 if device == "c5" else 2), ("mode", 0, 2), ("band", 0, 2),
+    _validate_link_mode(config.get("link_mode"), device)
+    for key, low, high in (("mode", 0, 2), ("band", 0, 2),
                            ("baud", 9600, 5000000), ("tcp_port", 1024, 65535), ("ap_channel", 1, 165)):
         if type(config.get(key)) is not int or not low <= config[key] <= high:
             raise ConfigError(f"{key} 必须为 {low}～{high} 的整数")
     if "flow_pin" in config:
         if device != "c5" or type(config["flow_pin"]) is not int or not 0 <= config["flow_pin"] <= 4:
             raise ConfigError("流控线必须为 0～4，且仅适用于 C5")
-        if config["link_mode"] == 2:
-            raise ConfigError("此 C5 固件已移除 UART WBR/1，请选择透传或 SPI")
     if config["link_mode"] == 3:
         if device != "c5" or not config.get("flow_pin"):
             raise ConfigError("GPIO 流控模式需要新版 C5 固件，并选择流控线")
@@ -204,6 +222,8 @@ def changed_config(baseline, edited, passwords=None, clear_passwords=(), device=
 def validate_patch(patch, device, baseline=None):
     if not isinstance(patch, dict):
         raise ConfigError("修改内容必须是 JSON 对象")
+    if "link_mode" in patch:
+        _validate_link_mode(patch["link_mode"], device)
     if "band" in patch and (type(patch["band"]) is not int or patch["band"] not in capabilities(device).bands):
         raise ConfigError(f"{capabilities(device).label} 不支持该频段")
     if device == "s3" and "ap_channel" in patch and (

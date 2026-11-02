@@ -18,16 +18,16 @@ from usb_diagnostics import USBMonitor, parse_stats
 
 class CurrentC5ModelTests(unittest.TestCase):
     def test_three_links_and_three_roles_preserve_all_new_fields_and_status(self):
-        for link in range(3):
+        for link in (0, 1, 3):
             for role in range(3):
-                document = config_tests.wbr_config(link_mode=link, net_role=role)
+                document = config_tests.wbr_config(link_mode=link, flow_pin=1, net_role=role)
                 result = public_config(document)
                 self.assertEqual(result, {k: v for k, v in document.items() if k != "config_source"})
                 self.assertEqual(changed_config(document, result), {})
 
     def test_full_patch_keeps_new_fields_and_excludes_revision_and_status(self):
-        baseline = config_tests.wbr_config()
-        changes = dict(link_mode=2, band=1, ap_channel=36, net_role=2, auto_reconnect=False,
+        baseline = config_tests.wbr_config(flow_pin=0)
+        changes = dict(link_mode=3, flow_pin=1, band=1, ap_channel=36, net_role=2, auto_reconnect=False,
                        remote_ip="192.168.137.99", remote_port=9000, local_port=0,
                        reconnect_ms=60000, connect_timeout_ms=100, up_kb=2048, down_kb=2048)
         edited = {**baseline, **changes, "revision": 999, "unsaved": True}
@@ -61,21 +61,21 @@ class CurrentC5ModelTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             public_config(config_tests.wbr_config(), "s3")
 
-    def test_drafts_keep_c5_link_2_network_fields_but_never_identity_or_secrets(self):
-        common = dict(link_mode=2, band=1, net_role=2, auto_reconnect=False,
+    def test_drafts_keep_c5_link_3_network_fields_but_never_identity_or_secrets(self):
+        common = dict(link_mode=3, flow_pin=1, band=1, net_role=2, auto_reconnect=False,
                       remote_ip="192.168.137.99", remote_port="9000", local_port="0",
                       reconnect_ms="1000", connect_timeout_ms="10000", up_kb="4096", down_kb="1024",
                       revision=100, http_session="secret", config_api="c5-wbr-1")
         state, warnings = clean_state({"version": 1, "device_drafts": {"c5": {"common": common}}})
         self.assertFalse(warnings)
         result = state["device_drafts"]["c5"]["common"]
-        self.assertEqual(result["link_mode"], 2)
+        self.assertEqual(result["link_mode"], 3)
         self.assertEqual(result["remote_port"], "9000")
         for key in ("revision", "http_session", "config_api"):
             self.assertNotIn(key, result)
 
-    def test_current_usb_stats_include_both_wbr_links_and_udp_totals(self):
-        for link in ("UART-WBR", "SPI-WBR"):
+    def test_current_usb_stats_include_current_links_and_udp_totals(self):
+        for link in ("UART0", "UART-GPIO-FLOW", "SPI-WBR"):
             fields = parse_stats(f"I stats: link={link} SPI rx/tx=12/34 protocol_errors=5 (network counters include UDP)")
             self.assertEqual(fields, {"link": link, "spi.rx": "12", "spi.tx": "34", "protocol_errors": "5"})
 
@@ -91,7 +91,7 @@ class CurrentC5HTTPTests(unittest.TestCase):
         return self.client.read()
 
     def test_reconstructed_http_client_uses_c5_header_and_current_revision(self):
-        baseline = self.read_current(link_mode=2, band=1, ap_channel=36)
+        baseline = self.read_current(link_mode=3, flow_pin=1, band=1, ap_channel=36)
         client = C5Client(f"http://127.0.0.1:{self.server.server_port}/", device="c5")
         client.bind_session(self.client.http_session)
         client.baseline = copy.deepcopy(baseline)
@@ -126,7 +126,7 @@ class CurrentC5HTTPTests(unittest.TestCase):
 class CurrentC5USBTests(unittest.TestCase):
     def setUp(self):
         self.device = SerialC5()
-        self.device.config = config_tests.wbr_config(link_mode=2, band=1, ap_channel=149)
+        self.device.config = config_tests.wbr_config(link_mode=3, flow_pin=1, band=1, ap_channel=149)
         patch = mock.patch("usb_diagnostics.serial.serial_for_url", return_value=self.device)
         patch.start()
         self.addCleanup(patch.stop)

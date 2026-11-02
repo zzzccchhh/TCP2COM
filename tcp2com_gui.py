@@ -15,7 +15,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
-from c5_config import C5Client, ConfigError, SaveOutcomeUnknown, changed_config, public_config
+from c5_config import C5Client, ConfigError, SaveOutcomeUnknown, changed_config, public_config, public_draft_config
 from c5_usb_config import C5USBClient
 from device_capabilities import DEVICES, BANDS, capabilities
 from gui_support import (BridgeController, atomic_json, config_job, default_settings,
@@ -29,6 +29,13 @@ DEVICE = {caps.label: key for key, caps in DEVICES.items()}
 MODES = {"TCP 客户端（电脑连接设备）": "tcp-client", "TCP 服务端（电脑等待设备）": "tcp-server",
          "UDP（固定对端）": "udp"}
 ESP_LEVEL = re.compile(r"^\s*([EWIDV])\s+\(\s*\d+\s*\)")
+
+
+def payload_interfaces(device):
+    if device == "c5":
+        return {"请选择接口（旧接口已移除）": -1, "UART 原始透传": 0,
+                "SPI WBR/1": 1, "UART GPIO 流控透传": 3}
+    return {"UART 原始透传": 0, "SPI WBR/1": 1, "UART WBR/1": 2}
 
 
 class Form:
@@ -357,7 +364,7 @@ class BridgeGUI:
             self.c5_forms[name] = Form(frame)
         form = self.c5_forms["common"]
         form.note("新固件读取当前运行配置；临时应用值可能尚未保存。明确保存后写 NVS 并重启，业务连接会断开。")
-        form.add("link_mode", "设备业务接口", 0, {"UART 原始透传": 0, "SPI WBR/1": 1, "UART WBR/1": 2})
+        form.add("link_mode", "设备业务接口", 0, payload_interfaces("c5"))
         form.add("flow_pin", "串口流控线（高暂停 / 低允许）", 1, {"未选择": 0, "SCK GPIO23": 1, "MOSI GPIO10": 2, "MISO GPIO9": 3, "CS GPIO5": 4})
         form.add("reset_pin", "外部复位线（仅串口模式）", 0, {"关闭": 0, "SCK GPIO23": 1, "MOSI GPIO10": 2, "MISO GPIO9": 3, "CS GPIO5": 4})
         form.add("mode", "设备 Wi-Fi 联网模式", 0, {"自建热点 AP": 0, "连接电脑热点": 1, "连接共享 Wi-Fi": 2})
@@ -455,6 +462,8 @@ class BridgeGUI:
                     continue
                 for key, value in fields.items():
                     if key in DRAFT_FIELDS[group] and key in self.c5_forms[group].variables:
+                        if group == "common" and key == "link_mode" and self.network.get("device") == "c5" and value == 2:
+                            value = -1
                         self.c5_forms[group].set(key, value)
             self._clear_passwords()
             for name in ("pc", "shared"):
@@ -551,7 +560,7 @@ class BridgeGUI:
                     form = self.c5_forms["common"]
                     form.options["band"] = {label: value for label, value in BANDS.items() if value in caps.bands}
                     form.widgets["band"].configure(values=list(form.options["band"]))
-                    form.options["link_mode"] = {"UART 原始透传":0,"SPI WBR/1":1,"UART WBR/1":2}
+                    form.options["link_mode"] = payload_interfaces(device)
                     form.widgets["link_mode"].configure(values=list(form.options["link_mode"]))
                     self._apply_device_draft(self._device_defaults)
                     draft = self._device_drafts.get(device)
@@ -614,20 +623,17 @@ class BridgeGUI:
                     "reconnect_ms","connect_timeout_ms","up_kb","down_kb"):
             self.c5_forms["common"].enable(key,enabled and self.baseline is not None and key in self.baseline)
         form = self.c5_forms["common"]
-        new_c5 = self.network.get("device") == "c5" and self.baseline is not None and "flow_pin" in self.baseline
-        links = {"UART 原始透传": 0, "SPI WBR/1": 1, **({"UART GPIO 流控透传": 3} if new_c5 else {"UART WBR/1": 2})}
-        if self.network.get("device") == "c5" and self.baseline is None:
-            links["UART GPIO 流控透传"] = 3
+        links = payload_interfaces(self.network.get("device"))
         try:
             current = form.get("link_mode")
         except ValueError:
-            current = 3 if form.variables["link_mode"].get() == "3" else 0
+            current = -1 if self.network.get("device") == "c5" else 0
         if form.options["link_mode"] != links:
             form.options["link_mode"] = links
             form.widgets["link_mode"].configure(values=list(links))
             with self._pause_device():
                 if current not in links.values():
-                    current = self.baseline.get("link_mode", 0) if self.baseline else 0
+                    current = -1 if self.network.get("device") == "c5" else 0
                 form.set("link_mode", current)
         self._c5_changes()
 
@@ -635,6 +641,11 @@ class BridgeGUI:
         if self.baseline is None:
             self.c5_dirty.set("请先读取")
             return
+        if self.network.get("device") == "c5" and self.c5_forms["common"].get("link_mode") == -1:
+            self.c5_dirty.set("旧接口已移除，请重新选择接口")
+            self.c5_buttons[2].configure(state="disabled")
+            return
+        self.c5_buttons[2].configure(state="normal" if not self.http_busy and not self.closing else "disabled")
         try:
             passwords = {"ap": self.c5_forms["ap"].get("ap_password"),
                          **{name: self.c5_forms[name].get("password") for name in ("pc", "shared")}}
@@ -788,9 +799,7 @@ class BridgeGUI:
 
     def _fill_c5(self, document):
         form = self.c5_forms["common"]
-        new_c5 = self.network.get("device") == "c5" and "flow_pin" in document
-        form.options["link_mode"] = {"UART 原始透传": 0, "SPI WBR/1": 1,
-                                     **({"UART GPIO 流控透传": 3} if new_c5 else {"UART WBR/1": 2})}
+        form.options["link_mode"] = payload_interfaces(self.network.get("device"))
         form.widgets["link_mode"].configure(values=list(form.options["link_mode"]))
         with self._pause_device():
             for name in ("common", "ap"):
@@ -876,9 +885,9 @@ class BridgeGUI:
             document = json.loads(Path(path).read_text(encoding="utf-8-sig"))
             if not isinstance(document, dict) or document.get("format") not in ("c5-user-config-v1", "wifi-bridge-user-config-v1"):
                 raise ConfigError("不支持的设备备份格式（与电脑 profiles 文件不同）")
-            self._fill_c5(public_config(document["config"], self.network.get("device")))
+            self._fill_c5(public_draft_config(document["config"], self.network.get("device")))
             self._remember_device_draft()
-            self.c5_status.set("已导入到编辑区；密码未导入，尚未写入设备")
+            self.c5_status.set("已导入到编辑区；旧接口需重新选择，密码未导入，尚未写入设备")
         except (KeyError, ValueError, OSError) as exc:
             self.error(exc)
 

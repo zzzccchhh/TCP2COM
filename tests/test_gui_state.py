@@ -60,14 +60,14 @@ class StateFileTests(unittest.TestCase):
         document = snapshot()
         document["forms"]["network"].update(device="unknown", port="9000")
         document["device_drafts"]["s3"]["common"]["band"] = 1
-        document["device_drafts"]["c5"] = {"common": {"link_mode": 2, "band": 1}}
+        document["device_drafts"]["c5"] = {"common": {"link_mode": 3, "band": 1}}
         self.path.write_text(json.dumps(document), encoding="utf-8")
         loaded, warning = load_state(self.path)
         self.assertTrue(warning)
         self.assertNotIn("device", loaded["forms"]["network"])
         self.assertEqual(loaded["forms"]["network"]["port"], "9000")
         self.assertNotIn("band", loaded["device_drafts"]["s3"]["common"])
-        self.assertEqual(loaded["device_drafts"]["c5"]["common"]["link_mode"], 2)
+        self.assertEqual(loaded["device_drafts"]["c5"]["common"]["link_mode"], 3)
         self.assertEqual(loaded["device_drafts"]["c5"]["common"]["band"], 1)
 
     def test_missing_damaged_duplicate_new_version_and_oversized_files(self):
@@ -311,7 +311,7 @@ class GUIStateTests(unittest.TestCase):
         self.assertEqual(self.gui.network.get("port"), "8123")
 
     def test_device_drafts_are_separate_and_require_a_fresh_read(self):
-        self.gui.c5_forms["common"].set("link_mode", 2)
+        self.gui.c5_forms["common"].set("link_mode", 3)
         self.gui.c5_forms["common"].set("net_role", 2)
         self.gui.c5_forms["common"].set("remote_port", "9000")
         self.gui.c5_forms["common"].set("up_kb", "2048")
@@ -342,7 +342,7 @@ class GUIStateTests(unittest.TestCase):
             error.assert_called_once()
             request.assert_not_called()
         self.gui.network.set("device", "c5")
-        self.assertEqual(self.gui.c5_forms["common"].get("link_mode"), 2)
+        self.assertEqual(self.gui.c5_forms["common"].get("link_mode"), 3)
         self.assertEqual(self.gui.c5_forms["common"].get("net_role"), 2)
         self.assertEqual(self.gui.c5_forms["common"].get("remote_port"), "9000")
         self.assertEqual(self.gui.c5_forms["common"].get("up_kb"), "2048")

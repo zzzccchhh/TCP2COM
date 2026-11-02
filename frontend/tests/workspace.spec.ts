@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { defaults, deviceDefaults, emptySnapshot } from '../src/api';
 
-async function installBridge(page: Page, count = 3) {
-    await page.addInitScript(({ settings, config, snapshot, count }) => {
+async function installBridge(page: Page, count = 3, retiredDraft = false) {
+    await page.addInitScript(({ settings, config, snapshot, count, retiredDraft }) => {
         const state = { ...snapshot, logs: [
             { id: 1, time: '12:00:00', source: 'host', level: '', text: '主机连接已就绪' },
             { id: 2, time: '12:00:01', source: 'usb', level: 'E', text: 'E (123) device error' },
@@ -16,7 +16,7 @@ async function installBridge(page: Page, count = 3) {
         const response = (data: any) => Promise.resolve({ ok: true, data });
         window.pywebview = { api: new Proxy({}, { get: (_, method: string) => (...args: any[]) => {
             calls.push([method, ...args]);
-            if (method === 'initial') return response({ settings, config, drafts: {} });
+            if (method === 'initial') return response({ settings, config, drafts: retiredDraft ? { c5: { common: { link_mode: 2, remote_port: '9000' } } } : {} });
             if (method === 'ports') return response([{ device: 'COM88', description: 'USB Serial' }]);
             if (method === 'poll') return response({ ...state, logs: args[0] >= state.cursor ? [] : state.logs });
             if (method === 'update_settings') { Object.assign(settings, args[0]); state.baseline = null; state.epoch++; return response(true); }
@@ -25,7 +25,7 @@ async function installBridge(page: Page, count = 3) {
             if (method === 'save_device') { state.baseline = null; state.epoch++; return response({ saved: true }); }
             return response(true);
         } }) };
-    }, { settings: { ...defaults }, config: deviceDefaults('c5'), snapshot: { ...emptySnapshot }, count });
+    }, { settings: { ...defaults }, config: deviceDefaults('c5'), snapshot: { ...emptySnapshot }, count, retiredDraft });
 }
 
 test('browser preview is explicit and does not pretend to connect', async ({ page }) => {
@@ -285,4 +285,22 @@ test('new C5 exposes GPIO flow mode and pin without changing S3 options', async 
     await page.getByRole('button', { name: '打开配置面板' }).click();
     await expect(panel.getByLabel('串口流控线（高暂停 / 低允许）', { exact: true })).toHaveCount(0);
     await expect(panel.getByLabel('MCU 接口', { exact: true }).locator('option')).toHaveText(['UART 原始透传', 'SPI WBR/1', 'UART WBR/1']);
+});
+
+
+test('C5 old drafts require selecting an interface without losing network fields', async ({ page }) => {
+    await installBridge(page, 3, true);
+    await page.goto('/');
+    await page.getByRole('button', { name: '打开配置面板' }).click();
+    const panel = page.getByRole('dialog', { name: '设备配置面板' });
+    const mode = panel.getByLabel('MCU 接口', { exact: true });
+    await expect(mode.locator('option[value="2"]')).toHaveCount(0);
+    await panel.getByRole('button', { name: '读取设备', exact: true }).click();
+    await panel.getByRole('button', { name: '恢复草稿', exact: true }).click();
+    await expect(mode).toHaveValue('-1');
+    await expect(mode.locator('option[value="2"]')).toHaveCount(0);
+    await expect(panel.getByLabel('设备目标端口', { exact: true })).toHaveValue('9000');
+    await expect(panel.getByRole('button', { name: '保存并重启', exact: true })).toBeDisabled();
+    await mode.selectOption('0');
+    await expect(panel.getByRole('button', { name: '保存并重启', exact: true })).toBeEnabled();
 });

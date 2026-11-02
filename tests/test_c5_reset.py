@@ -12,7 +12,7 @@ from test_c5_config import wbr_config
 
 class C5ResetTests(unittest.TestCase):
     def test_optional_configuration_and_bounds(self):
-        old = wbr_config(link_mode=2)
+        old = wbr_config(link_mode=0)
         self.assertNotIn("reset_pin", public_config(old))
         for pin in range(5):
             config = {**old, "reset_pin": pin}

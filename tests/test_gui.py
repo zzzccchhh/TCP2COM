@@ -344,12 +344,12 @@ class GUITests(unittest.TestCase):
 
     def test_c5_wbr_usb_gui_edits_all_network_fields_and_dual_band(self):
         device = SerialC5()
-        device.config = wbr_config(link_mode=2)
+        device.config = wbr_config(link_mode=3, flow_pin=1)
         self.connect_usb_fixture(device)
         self.gui.read_c5()
         wait_for(lambda: self.gui.baseline is not None, self.root.update)
         form = self.gui.c5_forms["common"]
-        self.assertEqual(set(form.options["link_mode"].values()), {0, 1, 2})
+        self.assertEqual(set(form.options["link_mode"].values()), {-1, 0, 1, 3})
         self.assertNotIn("逐飞", str(form.options["link_mode"]))
         self.assertIn("编辑修订 23", self.gui.c5_status.get())
         patch = dict(link_mode=1, band=1, net_role=2, remote_ip="192.168.137.100",
@@ -385,7 +385,7 @@ class GUITests(unittest.TestCase):
         self.read_fixture()
         self.assertEqual(str(self.gui.c5_forms["common"].widgets["reset_pin"]["state"]), "disabled")
         device = SerialC5()
-        device.config = wbr_config(link_mode=2, reset_pin=0)
+        device.config = wbr_config(link_mode=0, reset_pin=0)
         self.connect_usb_fixture(device)
         self.gui.read_c5()
         wait_for(lambda: self.gui.baseline is not None, self.root.update)
@@ -399,7 +399,7 @@ class GUITests(unittest.TestCase):
 
     def test_c5_wbr_gui_backup_import_and_draft_keep_network_without_session(self):
         device = SerialC5()
-        device.config = wbr_config(link_mode=2)
+        device.config = wbr_config(link_mode=3, flow_pin=1)
         self.connect_usb_fixture(device)
         self.gui.read_c5()
         wait_for(lambda: self.gui.baseline is not None, self.root.update)
@@ -417,14 +417,39 @@ class GUITests(unittest.TestCase):
             self.gui.import_c5()
         self.assertEqual(self.gui.edited_c5()["remote_port"], 9000)
         self.assertEqual(self.gui.edited_c5()["up_kb"], 2048)
-        self.assertEqual(self.gui.edited_c5()["link_mode"], 2)
+        self.assertEqual(self.gui.edited_c5()["link_mode"], 3)
         self.assertEqual(self.gui.baseline["revision"], 23)
         self.assertEqual(device.save_count, 0)
         self.gui.network.set("device", "s3")
         self.gui.network.set("device", "c5")
         self.assertEqual(self.gui.c5_forms["common"].get("remote_port"), "9000")
-        self.assertEqual(self.gui.c5_forms["common"].get("link_mode"), 2)
+        self.assertEqual(self.gui.c5_forms["common"].get("link_mode"), 3)
         self.assertIsNone(self.gui.baseline)
+
+    def test_c5_retired_device_read_never_enables_save(self):
+        device = SerialC5()
+        device.config = wbr_config(link_mode=2)
+        self.connect_usb_fixture(device)
+        self.gui.read_c5()
+        wait_for(lambda: not self.gui.http_busy, self.root.update)
+        self.assertIsNone(self.gui.baseline)
+        self.assertIn("升级固件", self.gui.c5_status.get())
+        self.assertEqual(str(self.gui.c5_buttons[2]["state"]), "disabled")
+        self.assertEqual(device.save_count, 0)
+
+    def test_c5_old_backup_requires_selection_and_preserves_network(self):
+        self.read_fixture()
+        document = {"format": "c5-user-config-v1", "config": wbr_config(link_mode=2, remote_port=9000)}
+        path = Path(self.temporary.name) / "retired-backup.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        with mock.patch("tcp2com_gui.filedialog.askopenfilename", return_value=str(path)):
+            self.gui.import_c5()
+        form = self.gui.c5_forms["common"]
+        self.assertEqual(form.get("link_mode"), -1)
+        self.assertEqual(form.get("remote_port"), "9000")
+        self.assertEqual(str(self.gui.c5_buttons[2]["state"]), "disabled")
+        form.set("link_mode", 0)
+        self.assertNotEqual(str(self.gui.c5_buttons[2]["state"]), "disabled")
 
     def test_c5_gpio_flow_read_edit_and_recovery_save(self):
         document = wbr_config(link_mode=3, flow_pin=2, reset_pin=0, migration_requires_setup=True)

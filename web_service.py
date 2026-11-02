@@ -13,7 +13,7 @@ import time
 
 from serial.tools import list_ports
 
-from c5_config import C5Client, ConfigError, changed_config, public_config
+from c5_config import C5Client, ConfigError, changed_config, public_config, public_draft_config
 from c5_usb_config import C5USBClient
 from device_capabilities import capabilities
 from gui_state import CHOICES, BOOLEANS, DRAFT_FIELDS, FORM_FIELDS, VERSION, clean_state, load_state, save_state
@@ -72,6 +72,8 @@ def draft_to_config(draft, device):
                     if type(target.get(key)) is int and isinstance(value, str) and value.isascii() and value.isdigit():
                         value = int(value)
                     target[key] = value
+    if device == "c5" and result.get("link_mode") == 2:
+        result["link_mode"] = -1
     return result
 
 
@@ -312,7 +314,7 @@ class WebService:
                 if document.get("unsaved"):
                     self._status += "；当前运行值尚未保存到 NVS"
                 if document.get("migration_requires_setup"):
-                    self._status += "；旧 SPI 恢复：业务接口已停用，请选择新接口并保存重启"
+                    self._status += "；旧业务接口恢复：业务接口已停用，请选择新接口并保存重启"
                 device = self._settings["device"]
                 if device not in self._drafts:
                     self._drafts[device] = config_to_draft(document)
@@ -393,7 +395,7 @@ class WebService:
             document = json.loads(text.lstrip("\ufeff"))
             if not isinstance(document, dict) or document.get("format") not in ("c5-user-config-v1", "wifi-bridge-user-config-v1"):
                 raise ValueError("不支持的设备备份格式")
-            return public_config(document["config"], self._settings["device"])
+            return public_draft_config(document["config"], self._settings["device"])
 
     @endpoint
     def backup_config(self, edited):

@@ -21,7 +21,8 @@ class C5FlowTests(unittest.TestCase):
                 public_config(wbr_config(link_mode=3, flow_pin=pin))
 
     def test_old_firmware_and_s3_remain_compatible(self):
-        self.assertEqual(public_config(wbr_config(link_mode=2))["link_mode"], 2)
+        with self.assertRaisesRegex(ConfigError, "升级固件"):
+            public_config(wbr_config(link_mode=2))
         self.assertEqual(public_config(wbr_config(device="s3", link_mode=2), "s3")["link_mode"], 2)
         with self.assertRaises(ConfigError):
             validate_patch({"link_mode": 3, "flow_pin": 1}, "c5", wbr_config())

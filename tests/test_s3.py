@@ -182,7 +182,9 @@ class BridgeProtocolTests(unittest.TestCase):
     def test_extended_fields_validation_for_c5_and_s3(self):
         document={**config_tests.example_config(),"link_mode":2,"remote_port":9000,"up_kb":4096,"down_kb":1024}
         self.assertEqual(public_config(document,"s3")["remote_port"],9000)
-        self.assertEqual(public_config(document,"c5")["link_mode"],2)
+        with self.assertRaises(ConfigError):
+            public_config(document,"c5")
+        document["link_mode"] = 1
         for device in ("c5", "s3"):
             for key,value in (("remote_port",0),("net_role",3),("up_kb",6144)):
                 with self.assertRaises(ConfigError):public_config({**document,key:value},device)
