@@ -17,7 +17,13 @@ async function ready(page: Page) {
 
 for (const action of ['escape', 'selection'] as const) test(`COM text stays sharp throughout menu exit by ${action}`, async ({ page }) => {
     await ready(page);
-    if (action === 'escape') await page.setViewportSize({ width: 390, height: 500 });
+    if (action === 'escape') {
+        await page.setViewportSize({ width: 390, height: 500 });
+        // Keep the enlarged trigger near the bottom to exercise an upward-opening menu.
+        await page.getByLabel('业务 COM', { exact: true }).evaluate(element => {
+            scrollBy(0, element.getBoundingClientRect().bottom - innerHeight + 45);
+        });
+    }
     const com = page.getByLabel('业务 COM', { exact: true });
     await page.getByRole('button', { name: '选择业务 COM', exact: true }).click();
     const popup = page.locator('.picker-position');

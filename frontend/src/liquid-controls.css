@@ -1,5 +1,13 @@
 /* Shared moving lens: reuse the local SDF refraction engine, including on touch devices. */
 .liquid-segments { position: relative; isolation: isolate; user-select: none; touch-action: pan-y; }
+.liquid-anchor {
+    position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none;
+    transform: translate3d(var(--liquid-x, 0px), var(--liquid-y, 0px), 0);
+    /* A single final-size allocation avoids rebuilding the refraction map during size tweens. */
+    transition: none;
+}
+.liquid-segments[data-positioned] .liquid-anchor { transition: transform .28s cubic-bezier(.22, 1, .36, 1); }
+.liquid-segments[data-dragging] .liquid-anchor { transition: none; }
 .liquid-indicator {
     position: absolute;
     left: 0;
@@ -25,6 +33,23 @@
     border: 1px solid transparent; border-top-color: #ffffffd9; border-bottom-color: #7e9dc54d;
 }
 .liquid-segments[data-dragging] .liquid-indicator { transition: width .08s linear, height .08s linear; box-shadow: 0 4px 14px #527dca45, 0 0 12px #ffffff8c; }
+/* Position snaps independently; only the lens contour and its light relax after release.
+   Opposite radii form a round leading droplet and a tapered trailing edge. */
+.liquid-anchor > .liquid-indicator {
+    width: 100%; height: 100%;
+    border-radius: calc(var(--lens-radius) * (1 - var(--liquid-bend, 0) * .4)) calc(var(--lens-radius) * (1 + var(--liquid-bend, 0) * .4)) calc(var(--lens-radius) * (1 + var(--liquid-bend, 0) * .24)) calc(var(--lens-radius) * (1 - var(--liquid-bend, 0) * .24)) / calc(50% - var(--liquid-bend, 0) * 12%) calc(50% + var(--liquid-bend, 0) * 12%) calc(50% - var(--liquid-bend, 0) * 8%) calc(50% + var(--liquid-bend, 0) * 8%);
+    transform: scale(calc(1 + var(--liquid-strain, 0)), calc(1 / (1 + var(--liquid-strain, 0)))) skewX(calc(var(--liquid-bend, 0) * -5deg));
+    transition: box-shadow .24s ease, background .24s ease, scale .24s cubic-bezier(.22, 1, .36, 1);
+}
+.liquid-anchor > .liquid-indicator::before {
+    background: radial-gradient(ellipse at var(--glass-light-x, 35%) 0%, #ffffff85, transparent 48%), linear-gradient(165deg, #ffffff24, #c3dcff03 50%, #ffffff18);
+}
+.liquid-segments[data-pressed] .liquid-anchor > .liquid-indicator {
+    scale: 1.035 1.06;
+    box-shadow: 0 7px 18px #315c9c40, 0 2px 4px #315c9c24, inset 0 1px 1px white, inset 0 -1px 2px #6d90bd66;
+    background: #ffffff06;
+}
+.liquid-segments[data-pressed] .liquid-anchor > .liquid-indicator::after { border-top-color: white; border-bottom-color: #638dc98c; }
 /* Paint labels before the lens: its backdrop now contains detail that can visibly refract. */
 .liquid-segments > button { position: relative; z-index: 0; touch-action: pan-y; }
 .liquid-segments { border-radius: 999px; background: linear-gradient(180deg, #91aed426, #e4efff52); box-shadow: inset 0 1px 3px #4a6c9624, 0 1px 0 #ffffffbf; }
@@ -40,7 +65,6 @@
 .log-sources { gap: 8px; }
 .log-filter { padding: 2px; gap: 3px; background: #c0d3ed26; }
 .log-filter > button { flex: 0 1 auto; padding: 5px 9px; }
-.log-filter .liquid-indicator { border-radius: 6px; }
 
 .glass-picker { width: 100%; }
 .device-switch > .glass-picker { width: 139px; flex-shrink: 0; }
@@ -80,9 +104,9 @@
 .picker-content { display: flex; flex-direction: column; min-height: 0; opacity: 0; clip-path: inset(var(--picker-clip-top, 0%) 0 var(--picker-clip-bottom, 100%) 0); }
 .picker-position[data-ready] .picker-content { transition: opacity var(--picker-duration) var(--picker-easing), clip-path var(--picker-duration) var(--picker-easing); }
 .picker-position[data-state="open"] .picker-content { opacity: 1; clip-path: inset(0 0 0 0); }
-.picker-heading { padding: 9px 10px 10px; font-size: 11px; font-weight: 600; color: #7185a3; border-bottom: 1px solid #8ba7ce1c; }
+.picker-heading { padding: 9px 10px 10px; font-size: var(--text-body); font-weight: 600; color: #7185a3; border-bottom: 1px solid #8ba7ce1c; }
 .picker-list { position: relative; overflow-y: auto; min-height: 0; padding: 4px; scrollbar-width: thin; overscroll-behavior: contain; }
-.picker-list > button { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; justify-content: space-between; width: 100%; min-height: 36px; padding: 9px 10px; background: transparent; border: 0; border-radius: 9px; text-align: left; font-size: 12px; line-height: 1.5; color: #506a90; }
+.picker-list > button { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; justify-content: space-between; width: 100%; min-height: 36px; padding: 9px 10px; background: transparent; border: 0; border-radius: 9px; text-align: left; font-size: var(--text-body); line-height: 1.5; color: #506a90; }
 .picker-list > button + button { margin-top: 3px; }
 .picker-list > button > span { overflow-wrap: anywhere; }
 .picker-list > button > svg { color: #527fca; flex-shrink: 0; }
@@ -91,7 +115,7 @@
 .picker-list > button:active { scale: none; }
 .picker-highlight { left: 4px; width: calc(100% - 8px); z-index: 0; border-radius: 11px; }
 .picker-position:not([data-ready]) .picker-highlight { transition: none; }
-.picker-empty { padding: 16px 10px; font-size: 12px; color: #7185a3; line-height: 1.7; }
+.picker-empty { padding: 16px 10px; font-size: var(--text-body); color: #7185a3; line-height: 1.7; }
 
 .liquid-overlay { opacity: 1; isolation: isolate; background: transparent; backdrop-filter: none; }
 .overlay-shade { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: #283b5b3d; backdrop-filter: blur(6px); opacity: 0; transition: opacity .38s ease; }
@@ -135,7 +159,7 @@
 .liquid-toggle[data-checked="true"] .liquid-check-mark > svg { stroke-dashoffset: 0; opacity: 1; transform: scale(1); }
 .liquid-toggle.confirmation:active .liquid-check-mark { scale: .92; }
 
-.disclosure-trigger { display: flex; align-items: center; gap: 7px; width: 100%; padding: 5px 0; border: 0; background: transparent; color: #617c9f; font: inherit; font-size: 10px; text-align: left; }
+.disclosure-trigger { display: flex; align-items: center; gap: 7px; width: 100%; padding: 5px 0; border: 0; background: transparent; color: #617c9f; font: inherit; font-size: var(--text-label); text-align: left; }
 .disclosure-trigger > svg:last-child { margin-left: auto; transition: transform .38s cubic-bezier(.2, 1.2, .3, 1); }
 .liquid-disclosure[data-open="true"] .disclosure-trigger > svg:last-child { transform: rotate(180deg); }
 .disclosure-grid { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .38s cubic-bezier(.22, 1, .36, 1); }
@@ -158,7 +182,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .liquid-segments[data-positioned] .liquid-anchor, .liquid-indicator { transition: none; }
     .liquid-indicator { transform: translate3d(var(--liquid-x, 0px), var(--liquid-y, 0px), 0); }
+    .liquid-anchor > .liquid-indicator { transform: none; scale: none; border-radius: 999px; }
     .liquid-toggle[data-dragging] .liquid-toggle-thumb { transform: translateX(calc(var(--toggle-progress) * 20px)); }
     .liquid-toggle.confirmation:active .liquid-check-mark { scale: none; }
     .picker-position, .picker-window, .picker-window::before, .picker-content, .liquid-overlay, .overlay-shade, .liquid-overlay > .drawer,

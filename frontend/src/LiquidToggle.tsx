@@ -56,7 +56,9 @@ export default function LiquidToggle({ checked, onChange, children, disabled = f
                     if (!current || current.id !== event.pointerId) return;
                     const delta = event.clientX - current.start;
                     current.moved ||= Math.abs(delta) > 3;
-                    current.progress = Math.max(0, Math.min(1, Number(checked) + delta / 22));
+                    const thumb = track.current!.querySelector<HTMLElement>('.liquid-toggle-thumb')!;
+                    const travel = Math.max(1, track.current!.clientWidth - thumb.offsetWidth - 4);
+                    current.progress = Math.max(0, Math.min(1, Number(checked) + delta / travel));
                     setProgress(current.progress);
                 }} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)}
                 onLostPointerCapture={event => { if (gesture.current) finish(event, true); }}>

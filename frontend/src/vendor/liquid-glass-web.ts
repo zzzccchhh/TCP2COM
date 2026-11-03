@@ -83,7 +83,9 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
         const width = element.offsetWidth;
         const height = element.offsetHeight;
         if (width < 2 || height < 2) { reset(); return; }
-        const radius = Math.min(parseFloat(getComputedStyle(element).borderTopLeftRadius) || 20, width / 2, height / 2);
+        // The moving capsule deforms locally; its optical map is allocated only for its resting size.
+        const radius = element.parentElement?.classList.contains('liquid-anchor') ? Math.min(width, height) / 2
+            : Math.min(parseFloat(getComputedStyle(element).borderTopLeftRadius) || 20, width / 2, height / 2);
         const key = `${width}:${height}:${radius}`;
         if (key === lastSize) return;
         try {

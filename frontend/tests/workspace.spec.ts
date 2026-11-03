@@ -227,15 +227,16 @@ test('high DPI workspace has no clipped columns', async ({ browser }) => {
     await context.close();
 });
 
-test('desktop keeps main controls and metrics in the first screen', async ({ page }) => {
+test('desktop keeps main actions visible and enlarged statistics reachable', async ({ page }) => {
     await page.setViewportSize({ width: 1420, height: 920 });
     await installBridge(page);
     await page.goto('/');
     await expect(page.getByText('本地运行', { exact: true })).toBeVisible();
-    const metrics = await page.getByLabel('桥接统计', { exact: true }).boundingBox();
-    expect(metrics!.y + metrics!.height).toBeLessThanOrEqual(920);
     await expect(page.getByRole('button', { name: '启动桥接' })).toBeInViewport();
     await expect(page.getByRole('button', { name: '打开配置面板' })).toBeInViewport();
+    await page.getByLabel('桥接统计', { exact: true }).scrollIntoViewIfNeeded();
+    await expect(page.getByLabel('桥接统计', { exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 

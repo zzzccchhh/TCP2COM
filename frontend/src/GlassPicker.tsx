@@ -71,7 +71,7 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             const below = bottom - rect.bottom - 12;
             const above = rect.top - topEdge - 12;
             const upwards = below < 210 && above > below;
-            const width = Math.min(Math.max(rect.width, 228), viewportWidth - 24);
+            const width = Math.min(Math.max(rect.width, 280), viewportWidth - 24);
             const maxHeight = Math.min(330, Math.max(90, upwards ? above : below));
             const left = Math.max(leftEdge + 12, Math.min(rect.left, leftEdge + viewportWidth - width - 12));
             const height = Math.min(popup.current?.offsetHeight || maxHeight, maxHeight);

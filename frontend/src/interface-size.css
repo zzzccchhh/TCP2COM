@@ -1,0 +1,102 @@
+/* Shared type and geometry: enlarge the workspace without browser zoom or scaled text. */
+:root {
+    --text-micro: 11px;
+    --text-caption: 12px;
+    --text-label: 13px;
+    --text-body: 14px;
+    --control-height: 42px;
+    --segment-height: 42px;
+    --icon-size: 18px;
+    --toggle-width: 56px;
+    --toggle-height: 34px;
+    font-size: var(--text-body);
+}
+.workspace { grid-template-columns: 310px minmax(0, 1fr) 320px; gap: 20px; }
+.connection-panel, .usb-panel, .device-panel { padding: 22px 20px 18px; }
+.panel-title > span:first-child { font-size: 15px; }
+.form-stack { gap: 16px; }
+.field { gap: 8px; }
+.field input, .field select, .device-switch select, .config-section .field input, .config-section .field select { height: var(--control-height); font-size: var(--text-body); border-radius: 10px; }
+.field-label, .config-section .field-label { font-size: var(--text-label); }
+.device-switch > .glass-picker { width: 160px; }
+.device-switch select { width: 100%; }
+.button, .usb-panel .button, .connection-actions .primary.full { min-height: var(--control-height); height: auto; padding: 10px 14px; font-size: var(--text-body); }
+.segmented > button { min-height: var(--segment-height); padding: 9px 6px; font-size: var(--text-label); gap: 5px; }
+.workspace-tabs > button { padding-inline: 16px; font-size: var(--text-body); }
+.workspace-toolbar { height: auto; min-height: calc(var(--segment-height) + 6px); flex-wrap: wrap; }
+.connection-status { min-height: var(--control-height); font-size: var(--text-label); }
+.button > svg, .segmented > button > svg, .field-label svg, .panel-title svg, .text-button svg, .subheading > svg, .disclosure-trigger > svg, .reset-card svg { width: var(--icon-size); height: var(--icon-size); }
+.icon-button, .icon-button.small, .log-tools .icon-button { min-width: var(--control-height); min-height: var(--control-height); padding: 8px; }
+.icon-button > svg { width: var(--icon-size); height: var(--icon-size); }
+.picker-toggle { width: var(--control-height); }
+.glass-picker.editable input { padding-right: calc(var(--control-height) + 4px); }
+.picker-heading { padding: 12px; font-size: var(--text-label); }
+.picker-list > button { min-height: var(--control-height); padding: 11px 12px; font-size: var(--text-body); }
+.picker-list > button > svg { width: var(--icon-size); height: var(--icon-size); }
+.disclosure-trigger { min-height: var(--control-height); font-size: var(--text-label); }
+.check { font-size: var(--text-body); min-height: var(--control-height); }
+.liquid-toggle-track { flex-basis: var(--toggle-width); height: var(--toggle-height); }
+.liquid-toggle-thumb { width: calc(var(--toggle-height) - 4px); height: calc(var(--toggle-height) - 4px); transform: translateX(calc(var(--toggle-progress) * (var(--toggle-width) - var(--toggle-height)))); }
+.liquid-toggle[data-dragging] .liquid-toggle-thumb { transform: translateX(calc(var(--toggle-progress) * (var(--toggle-width) - var(--toggle-height)))) scale(1.1, .95); }
+.toggle-state-on, .toggle-state-off { top: calc(50% - 4px); }
+.liquid-check-mark { flex-basis: 28px; height: 28px; }
+.log-toolbar { padding: 16px; flex-wrap: wrap; }
+.search-field input { height: var(--control-height); font-size: var(--text-body); }
+.log-sources { flex-wrap: wrap; gap: 8px; }
+.log-filter > button { min-height: 36px; padding: 7px 10px; }
+.log-retention { white-space: normal; }
+.log-row { grid-template-columns: 74px 46px minmax(0, 1fr); font-size: var(--text-body); }
+.terminal-panel { min-height: 500px; height: max(500px, calc(100vh - 390px)); }
+.terminal-footer { flex-wrap: wrap; }
+.runtime-line { flex-wrap: wrap; }
+.chart-plot svg { height: 140px; }
+.chart-axis, .chart-scale { font-size: var(--text-micro); color: #71839e; }
+.metric { padding-inline: 20px; }
+.metric strong { font-size: 26px; }
+.device-identity h2 { font-size: 17px; }
+.chip-icon { width: 44px; height: 44px; }
+.reset-card { padding: 14px 18px; }
+.drawer { width: min(580px, 100%); }
+.drawer.wide { width: min(740px, 100%); }
+.drawer-body h3, .help-step h3 { font-size: 16px; }
+.drawer-footer { flex-wrap: wrap; }
+.confirm-dialog { width: min(500px, 100%); max-height: calc(100dvh - 48px); overflow-y: auto; }
+.lan-panel { width: min(460px, calc(100vw - 32px)); }
+.lan-panel p, .lan-panel li { font-size: var(--text-body); }
+.lan-connection-state { top: calc(var(--control-height) + 6px); }
+.lan-entry > .button { font-size: var(--text-body); }
+.text-button { min-height: 28px; }
+.field small, .connection-note, .setup-note, .device-read-state, .device-facts span, .device-identity p, .log-row time, .log-origin, .terminal-footer, .runtime-line, .metric small, .page-footer { color: #63758f; }
+
+/* Two columns put connection and device actions first; logs use the next full row. */
+@media (max-width: 1350px) and (min-width: 761px) {
+    .app-shell { padding-inline: 24px; }
+    .workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+    .connection-column { grid-column: 1; grid-row: 1; }
+    .device-column { grid-column: 2; grid-row: 1; display: flex; gap: 16px; align-items: stretch; }
+    .center-column { grid-column: 1 / -1; grid-row: 2; }
+    .device-panel, .reset-card { grid-column: auto; grid-row: auto; align-self: stretch; }
+}
+@media (hover: none), (pointer: coarse) {
+    :root { --text-micro: 12px; --text-caption: 13px; --text-label: 14px; --text-body: 16px; --control-height: 48px; --segment-height: 48px; --icon-size: 20px; --toggle-width: 64px; --toggle-height: 38px; }
+    .log-filter > button { min-height: 48px; }
+    .text-button { min-height: 40px; }
+}
+@media (max-width: 760px) {
+    .app-shell { padding-inline: 16px; }
+    .workspace { grid-template-columns: minmax(0, 1fr); }
+    .connection-column, .center-column, .device-column { grid-column: auto; grid-row: auto; }
+    .device-column { grid-template-columns: minmax(0, 1fr); }
+    .device-panel, .reset-card { grid-column: auto; grid-row: auto; }
+    .device-switch > .glass-picker { width: 140px; }
+    .connection-panel, .usb-panel, .device-panel { padding: 20px 18px; }
+    .workspace-tabs > button { padding-inline: 12px; }
+    .log-row { grid-template-columns: 68px 40px minmax(0, 1fr); gap: 6px; }
+    .drawer-body, .drawer-heading { padding-inline: 20px; }
+    .config-section .form-grid { grid-template-columns: minmax(0, 1fr); }
+    .lan-entry > .button { padding-inline: 10px; }
+    .lan-connection-state { top: 72px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .liquid-toggle[data-dragging] .liquid-toggle-thumb { transform: translateX(calc(var(--toggle-progress) * (var(--toggle-width) - var(--toggle-height)))); }
+}

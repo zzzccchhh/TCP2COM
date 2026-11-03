@@ -47,7 +47,8 @@ for (const [width, height] of [[1024, 1366], [1366, 1024]]) {
         try {
             expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
             expect(await page.locator('body').evaluate(element => getComputedStyle(element).backgroundAttachment.split(',').every(value => value.trim() === 'scroll'))).toBe(true);
-            const box = (await page.locator('.terminal-panel').boundingBox())!;
+            // In portrait, controls lead and the chart moves below them. Probe another visible panel.
+            const box = (await page.locator(width === 1024 ? '.usb-panel' : '.terminal-panel').boundingBox())!;
             const clip = { x: box.x + 20, y: box.y + 20, width: 180, height: 110 };
             const baseline = await page.screenshot({ clip });
             const filters = await page.locator('.liquid-glass-defs').count();
@@ -75,6 +76,7 @@ test('tablet configuration and reset use a fixed blur mask and a stationary pane
     const { context, page } = await tablet(browser);
     try {
         for (const title of ['打开配置面板', '打开远程复位']) {
+            await page.getByRole('button', { name: title, exact: true }).scrollIntoViewIfNeeded();
             const box = (await page.locator('.connection-panel').boundingBox())!;
             const clip = { x: box.x + 20, y: box.y + 25, width: 165, height: 120 };
             const initial = await page.screenshot({ clip });

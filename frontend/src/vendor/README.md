@@ -17,10 +17,20 @@ and refraction on supported touch Chromium. Small lenses use the rounded SDF's
 edge normal with a narrow, low-blur rim; the flat centre stays transparent.
 Segment labels paint below the shared lens so its backdrop includes actual
 text detail, while panel text and form inputs stay outside their optical layers.
-CSS provides press/rebound and light effects.
+CSS provides press/rebound and light effects. Shared typography and control metrics
+use 14px body / 42px primary controls on desktop and 16px / 48px on touch.
+Responsive layouts prioritize connection and device actions without page scaling.
 
 `LiquidSegments` uses one shared lens per group, pointer capture after a primary
-press, local drag previews and a single change on release. Hover does not move
+press, separate click candidates (5px mouse / 8px touch threshold), local drag
+previews and a single change on release. A click targets the option rectangle
+directly; a drag retains its grab offset. An outer anchor owns monotonic position
+snapping and an inner lens owns lift, velocity-driven asymmetric droplet radii,
+area-preserving stretch, shear and damped shape recovery. The resting-size SDF
+bitmap is reused throughout dragging; shape updates only touch local CSS variables.
+The anchor takes its final size directly, avoiding per-frame map regeneration
+during width transitions. Initial layout appears in place before travel is enabled.
+Hover does not move
 the lens or the picker highlight. `GlassPicker` renders a portal listbox
 with the native form value and focus, and editable suggestions for COM/baud.
 `usePresence` retains overlays through reversible entrance/exit transitions,
