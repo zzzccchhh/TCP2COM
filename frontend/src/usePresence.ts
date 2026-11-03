@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState } from 'react';
 
 /** Retain content through exit; CSS transitions can reverse if reopened mid-flight. */
-export function usePresence<T>(value: T | null, duration = 260) {
+export function usePresence<T>(value: T | null, duration = 380) {
     const [retained, setRetained] = useState<T | null>(value);
     const [entered, setEntered] = useState(false);
     useLayoutEffect(() => {

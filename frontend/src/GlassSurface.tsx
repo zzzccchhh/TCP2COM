@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { HTMLAttributes } from 'react';
 import { attachLiquidGlass } from './vendor/liquid-glass-web';
 
-type Props = HTMLAttributes<HTMLElement> & { as?: 'section' | 'div' };
+type Props = HTMLAttributes<HTMLElement> & { as?: 'section' | 'div' | 'span' };
 
 /** Optics live on a decorative pseudo-element, independently of text and form controls. */
 export default function GlassSurface({ as: Tag = 'section', className = '', children, ...props }: Props) {

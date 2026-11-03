@@ -18,7 +18,8 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
     const wrap = useRef<HTMLSpanElement>(null);
     const optionNodes = useRef<(HTMLButtonElement | null)[]>([]);
     const [open, setOpen] = useState(false);
-    const presence = usePresence(open ? true : null, 200);
+    const presence = usePresence(open ? true : null);
+    const [arrived, setArrived] = useState(false);
     const [active, setActive] = useState(0);
     const [query, setQuery] = useState('');
     const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
@@ -48,6 +49,11 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
         trigger.current?.focus({ preventScroll: true });
     }
     useLayoutEffect(() => { if (open && (disabled || trigger.current?.matches(':disabled'))) close(); });
+    // Retained menus reopen in place instead of replaying the initial trigger transform.
+    useLayoutEffect(() => {
+        if (presence.entered) setArrived(true);
+        else if (!presence.present) setArrived(false);
+    }, [presence.entered, presence.present]);
     useLayoutEffect(() => {
         if (!presence.present) return;
         function place() {
@@ -64,9 +70,14 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             const upwards = below < 210 && above > below;
             const width = Math.min(Math.max(rect.width, 228), viewportWidth - 24);
             const maxHeight = Math.min(330, Math.max(90, upwards ? above : below));
-            setPosition({ left: Math.max(leftEdge + 12, Math.min(rect.left, leftEdge + viewportWidth - width - 12)), width,
-                maxHeight, ...(upwards ? { bottom: innerHeight - rect.top + 7 } : { top: rect.bottom + 7 }),
-                transformOrigin: upwards ? '50% 100%' : '50% 0%' });
+            const left = Math.max(leftEdge + 12, Math.min(rect.left, leftEdge + viewportWidth - width - 12));
+            const height = Math.min(popup.current?.offsetHeight || maxHeight, maxHeight);
+            const top = upwards ? rect.top - height - 7 : rect.bottom + 7;
+            setPosition({ left, top, width, maxHeight,
+                '--picker-dx': `${rect.left - left}px`, '--picker-dy': `${rect.top - top}px`,
+                '--picker-sx': rect.width / width, '--picker-sy': Math.min(1, rect.height / Math.max(1, height)),
+                '--picker-edge': upwards ? '100%' : '0%',
+            } as CSSProperties);
         }
         function outside(event: Event) {
             const target = event.target as Node;
@@ -78,6 +89,9 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
         function other(event: Event) { if ((event as CustomEvent).detail !== id) close(); }
         function scroll(event: Event) { if (!popup.current?.contains(event.target as Node)) place(); }
         place();
+        const observer = new ResizeObserver(place);
+        if (popup.current) observer.observe(popup.current);
+        if (trigger.current) observer.observe(trigger.current);
         window.addEventListener('resize', place);
         window.visualViewport?.addEventListener('resize', place);
         window.visualViewport?.addEventListener('scroll', place);
@@ -87,6 +101,7 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
         window.addEventListener('glass-picker-open', other);
         window.addEventListener('workspace-overlay-change', close);
         return () => {
+            observer.disconnect();
             window.removeEventListener('resize', place);
             window.visualViewport?.removeEventListener('resize', place);
             window.visualViewport?.removeEventListener('scroll', place);
@@ -144,7 +159,9 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             onPointerDown={event => event.preventDefault()} onClick={() => { if (open) close(); else reveal(); }}><ChevronDown size={13} /></button>
             : <ChevronDown size={13} />}
         {presence.present && createPortal(<div ref={element => { popup.current = element; }} className="picker-position"
-            style={position} data-state={presence.entered ? 'open' : 'closed'} aria-hidden={!open || undefined} inert={!open}>
+            style={position} data-state={presence.entered ? 'open' : 'closed'} data-closing={!open || undefined}
+            data-arrived={arrived || undefined}
+            aria-hidden={!open || undefined} inert={!open}>
             <GlassSurface className="picker-window" aria-label={`${label}选项`}>
                 <div className="picker-heading">{label}</div>
                 <div className="picker-list" role="listbox" id={id} aria-label={`${label}选项`}>
@@ -152,8 +169,8 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
                         style={{ '--liquid-y': `${highlight.top}px`, height: highlight.height } as CSSProperties} />}
                     {shown.map(([key, text], index) => <button type="button" role="option" tabIndex={-1} id={`${id}-${index}`} key={key}
                         ref={element => { optionNodes.current[index] = element; }} aria-selected={String(key) === String(value)}
-                        className={index === active ? 'is-active' : ''} onPointerMove={() => setActive(index)}
-                        onPointerDown={event => event.preventDefault()} onClick={() => choose(index)}>
+                        className={index === active ? 'is-active' : ''}
+                        onPointerDown={event => { event.preventDefault(); if (event.button === 0) setActive(index); }} onClick={() => choose(index)}>
                         <span>{text}</span>{String(key) === String(value) && <Check size={14} />}
                     </button>)}
                     {!shown.length && <p className="picker-empty">没有匹配的选项，可直接输入。</p>}

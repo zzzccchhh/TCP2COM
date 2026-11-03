@@ -11,6 +11,7 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
     const buttons = useRef<(HTMLButtonElement | null)[]>([]);
     const rects = useRef<Rect[]>([]);
     const drag = useRef<{ id: number; index: number } | null>(null);
+    const sample = useRef({ x: 0, time: 0, velocity: 0 });
     const [visual, setVisual] = useState<Rect>({ left: 3, top: 3, width: 0, height: 0 });
     const [preview, setPreview] = useState(-1);
     const [dragging, setDragging] = useState(false);
@@ -52,7 +53,7 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
         return index;
     }
     function follow(event: PointerEvent<HTMLDivElement>) {
-        if (disabled || (!drag.current && event.pointerType !== 'mouse')) return;
+        if (disabled || !drag.current || drag.current.id !== event.pointerId) return;
         const node = root.current!;
         const x = event.clientX - node.getBoundingClientRect().left - node.clientLeft;
         const index = nearest(x);
@@ -63,7 +64,13 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
         const left = Math.max(first.left, Math.min(last.left + last.width - rect.width, x - rect.width / 2));
         setPreview(index);
         setVisual({ ...rect, left });
-        setStretch(drag.current ? Math.min(.12, Math.abs(x - rect.left - rect.width / 2) / rect.width * .2 + .035) : 0);
+        const now = performance.now();
+        const velocity = sample.current.time ? (x - sample.current.x) / Math.max(8, now - sample.current.time) : 0;
+        sample.current = { x, time: now, velocity: sample.current.velocity * .35 + velocity * .65 };
+        setStretch(drag.current ? Math.min(.16, .035 + Math.abs(sample.current.velocity) * .065) : 0);
+        if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            node.style.setProperty('--glass-light-x', `${Math.max(0, Math.min(rect.width, x - left))}px`);
+        }
         if (drag.current) drag.current.index = index;
     }
     function finish(event: PointerEvent<HTMLDivElement>, cancelled = false) {
@@ -87,6 +94,7 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
             if (index < 0) return;
             root.current!.setPointerCapture(event.pointerId);
             drag.current = { id: event.pointerId, index };
+            sample.current = { x, time: performance.now(), velocity: 0 };
             setDragging(true); follow(event);
         }} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)}
         onLostPointerCapture={event => { if (drag.current) finish(event, true); }}

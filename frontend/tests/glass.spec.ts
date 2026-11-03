@@ -24,6 +24,8 @@ test('desktop refraction changes the rendered backdrop without filtering text', 
 });
 
 test('resizing and reopening panels release optical resources and preserve input', async ({ page }) => {
+    // Three animated overlay cycles, large screenshots and two viewport changes share this test.
+    test.setTimeout(60000);
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto('/');

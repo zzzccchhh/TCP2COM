@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-    Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, CircleHelp,
+    Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, Check, CircleHelp,
     Cable, Download, FileJson, History, Info, LoaderCircle, Network, Pause, Play,
     Radio, RefreshCw, RotateCcw, Search, Settings2, ShieldCheck, SlidersHorizontal,
     Square, Terminal, Trash2, Unplug, Usb, Wifi, X, Zap,
@@ -12,6 +12,8 @@ import Pairing from './Pairing';
 import GlassSurface from './GlassSurface';
 import GlassPicker from './GlassPicker';
 import LiquidSegments from './LiquidSegments';
+import Toggle from './LiquidToggle';
+import LiquidDisclosure from './LiquidDisclosure';
 import { usePresence } from './usePresence';
 import { getLANStatus, isLAN } from './lan';
 
@@ -30,10 +32,6 @@ function Field({ label, value, onChange, options, disabled, type = 'text', hint,
             onChange={e => onChange(numeric && /^\d+$/.test(e.target.value) ? Number(e.target.value) : e.target.value)} />}
         {hint && <small>{hint}</small>}
     </label>;
-}
-
-function Toggle({ checked, onChange, children, disabled = false }: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; disabled?: boolean }) {
-    return <label className="check"><input type="checkbox" checked={checked} disabled={disabled} onChange={e => onChange(e.target.checked)} /><span>{children}</span></label>;
 }
 
 function Badge({ children, active = false, warning = false }: { children: ReactNode; active?: boolean; warning?: boolean }) {
@@ -193,6 +191,12 @@ export default function App() {
         window.addEventListener('keydown', trap);
         return () => { document.body.style.overflow = ''; window.removeEventListener('keydown', trap); previousFocus?.focus(); };
     }, [drawerMotion.present, confirmMotion.present, shownDrawer]);
+    useEffect(() => {
+        // A morphing dialog starts hidden; move focus after its entrance state becomes visible.
+        if (!drawerMotion.entered && !confirmMotion.entered) return;
+        const modal = document.querySelector(confirmMotion.entered ? '.confirm-dialog' : '.drawer');
+        modal?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled)')?.focus();
+    }, [drawerMotion.entered, confirmMotion.entered]);
 
     function change(key: string, value: any) {
         const next = { ...settingsRef.current, [key]: value };
@@ -332,7 +336,7 @@ export default function App() {
                         <div className="form-grid">{field('com', '业务 COM', { list: 'serial-ports' })}
                             {field('baud', '波特率 / bps', { list: 'baud-rates' })}
                         </div>
-                        <details className="advanced"><summary><SlidersHorizontal size={14} />高级参数<ChevronDown size={13} /></summary>
+                        <LiquidDisclosure>
                             <div className="form-stack">
                                 {settings.mode === 'tcp-server' && field('host', '来源 IP 筛选（可选）', { hint: '留空允许任意来源连接' })}
                                 <div className="form-grid">{field('bytesize', '数据位', { options: ['5', '6', '7', '8'].map(v => [v, v]) })}{field('parity', '校验位', { options: ['N', 'E', 'O', 'M', 'S'].map(v => [v, v]) })}</div>
@@ -342,7 +346,7 @@ export default function App() {
                                 {device === 'esp01s' && <>{field('control_port', '复位控制端口')}<Toggle checked={!!settings.no_reset_ui} onChange={value => change('no_reset_ui', value)}>关闭远程复位入口</Toggle></>}
                                 <Toggle checked={!!settings.verbose} onChange={value => change('verbose', value)}>调试日志</Toggle>
                             </div>
-                        </details>
+                        </LiquidDisclosure>
                     </fieldset>
                     <div className="connection-actions">
                         {!snap.running ? <button className="button primary full" disabled={waiting || !ready} onClick={() => run(() => call('bridge', 'start'))}>{working ? <LoaderCircle size={15} className="spin" /> : <Play size={14} fill="currentColor" />}启动桥接<ArrowRight size={15} /></button>
@@ -448,7 +452,7 @@ export default function App() {
                         {cf('ap_ip', '热点 IP')}{cf('ap_gateway', '网关')}{cf('ap_netmask', '子网掩码')}
                     </div></div> : <div className="config-section"><h3>{configTab === 'pc' ? '电脑热点 STA' : '共享 Wi-Fi STA'}</h3><div className="form-grid">
                         {cf('ssid', 'SSID', {}, configTab)}<Field label="新密码（留空保留）" type="password" value={passwords[configTab]} disabled={waiting} onChange={value => setPasswords({ ...passwords, [configTab]: value })} />
-                    </div><Toggle disabled={waiting} checked={clear.includes(configTab)} onChange={value => setClear(value ? [...clear, configTab] : clear.filter(name => name !== configTab))}>开放网络 / 明确清空原密码</Toggle>
+                    </div><Toggle confirmation disabled={waiting} checked={clear.includes(configTab)} onChange={value => setClear(value ? [...clear, configTab] : clear.filter(name => name !== configTab))}>开放网络 / 明确清空原密码</Toggle>
                         <Toggle disabled={waiting} checked={!!config[configTab]?.static_ip} onChange={value => editConfig('static_ip', value, configTab)}>使用静态 IP（关闭时使用 DHCP）</Toggle>
                         <div className="form-grid">{[['ip', 'IP 地址'], ['gateway', '网关'], ['netmask', '子网掩码'], ['dns', 'DNS']].map(([key, label]) => cf(key, label, { disabled: waiting || !config[configTab]?.static_ip }, configTab))}</div>
                     </div>}

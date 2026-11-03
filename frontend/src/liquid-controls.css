@@ -4,24 +4,30 @@
     position: absolute;
     left: 0;
     top: 0;
-    z-index: 0;
+    z-index: 2;
     min-width: 0;
-    border-radius: 9px;
+    border-radius: 999px;
     pointer-events: none;
-    border: 1px solid #ffffffed;
+    border: 1px solid #ffffffd9;
     background: transparent;
-    box-shadow: 0 3px 10px #4f79bb26, inset 0 1px 0 white, inset 0 -1px 1px #8eafea33;
+    box-shadow: 0 3px 9px #42669326, 0 0 0 1px #5675a317, inset 0 1px 1px white, inset 0 -1px 2px #6d90bd42;
     transform: translate3d(var(--liquid-x, 0px), var(--liquid-y, 0px), 0) scale(calc(1 + var(--liquid-stretch, 0)), calc(1 - var(--liquid-stretch, 0) * .45));
     transition: transform .42s cubic-bezier(.2, 1.35, .35, 1), width .32s cubic-bezier(.2, 1.1, .35, 1), height .25s;
 }
 .liquid-indicator::before {
-    background: linear-gradient(150deg, #fffffff0, #e0edff80 48%, #ffffffb8);
+    background: radial-gradient(ellipse at var(--glass-light-x, 35%) 0%, #ffffff63, transparent 65%), linear-gradient(165deg, #ffffff30, #c3dcff0d 50%, #ffffff26);
     -webkit-backdrop-filter: var(--glass-refraction, blur(5px) saturate(1.5));
     backdrop-filter: var(--glass-refraction, blur(5px) saturate(1.5));
     box-shadow: inset 0 1px 1px white, inset 0 -1px 2px #9bbcf342;
 }
+.liquid-indicator::after, .liquid-toggle-thumb::after {
+    content: ''; position: absolute; inset: 1px; border-radius: inherit; pointer-events: none;
+    border: 1px solid transparent; border-top-color: #ffffffd9; border-bottom-color: #7e9dc54d;
+}
 .liquid-segments[data-dragging] .liquid-indicator { transition: width .08s linear, height .08s linear; box-shadow: 0 4px 14px #527dca45, 0 0 12px #ffffff8c; }
-.liquid-segments > button { position: relative; z-index: 1; touch-action: pan-y; }
+/* Paint labels before the lens: its backdrop now contains detail that can visibly refract. */
+.liquid-segments > button { position: relative; z-index: 0; touch-action: pan-y; }
+.liquid-segments { border-radius: 999px; background: linear-gradient(180deg, #91aed426, #e4efff52); box-shadow: inset 0 1px 3px #4a6c9624, 0 1px 0 #ffffffbf; }
 .liquid-segments > button.selected, .liquid-segments > button.is-preview {
     color: #315f9f;
     background: transparent;
@@ -52,14 +58,24 @@
     z-index: 60;
     display: flex;
     flex-direction: column;
-    opacity: 0;
-    transform: translateY(-5px) scale(.96);
-    transition: transform .2s cubic-bezier(.2, 1.2, .35, 1), opacity .18s;
+    /* Do not fade this ancestor: opacity creates a backdrop root and breaks live sampling. */
+    opacity: 1;
+    visibility: hidden;
+    transform-origin: 0 0;
+    transform: translate(var(--picker-dx, 0px), var(--picker-dy, -16px)) scale(var(--picker-sx, .8), var(--picker-sy, .2));
+    transition: transform .38s cubic-bezier(.2, 1.12, .3, 1), visibility 0s .38s;
 }
-.picker-position[data-state="open"] { opacity: 1; transform: translateY(0) scale(1); }
+.picker-position[data-state="open"] { visibility: visible; transform: translate(0, 0) scale(1); transition-delay: 0s; }
 .picker-position[data-state="closed"] { pointer-events: none; }
-.picker-window { display: flex; flex-direction: column; min-height: 0; max-height: inherit; padding: 6px; border-radius: 17px; box-shadow: 0 14px 45px #2c477d2b, inset 0 1px 0 white; }
-.picker-window::before { background: linear-gradient(135deg, #fffffff0, #edf4ffd9 55%, #f3f0ffe6); }
+/* Exit only collapses the optical sheet. Keep full-size text and never cover the trigger. */
+.picker-position[data-arrived], .picker-position[data-closing] { transform: translate(0, 0) scale(1); }
+.picker-window { display: flex; flex-direction: column; min-height: 0; max-height: inherit; padding: 6px; border-radius: 30px; box-shadow: 0 6px 15px #2c477d14, inset 0 1px 0 white; transition: border-radius .38s, box-shadow .38s, border-color .15s; }
+.picker-position[data-state="open"] .picker-window { border-radius: 20px; box-shadow: 0 14px 45px #2c477d38, inset 0 1px 0 white; }
+.picker-window::before { background: linear-gradient(135deg, #ffffffb8, #edf4ff8c 55%, #f3f0ff9c); transform: scaleY(1); transform-origin: 50% var(--picker-edge, 0%); transition: transform .38s cubic-bezier(.22, 1, .36, 1); }
+.picker-position[data-closing] .picker-window { border-color: transparent; box-shadow: none; }
+.picker-position[data-closing] .picker-window::before { transform: scaleY(0); }
+.picker-heading, .picker-list { opacity: 0; transition: opacity .15s; }
+.picker-position[data-state="open"] .picker-heading, .picker-position[data-state="open"] .picker-list { opacity: 1; transition-delay: .08s; }
 .picker-heading { padding: 9px 10px 10px; font-size: 11px; font-weight: 600; color: #7185a3; border-bottom: 1px solid #8ba7ce1c; }
 .picker-list { position: relative; overflow-y: auto; min-height: 0; padding: 4px; scrollbar-width: thin; overscroll-behavior: contain; }
 .picker-list > button { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; justify-content: space-between; width: 100%; min-height: 36px; padding: 9px 10px; background: transparent; border: 0; border-radius: 9px; text-align: left; font-size: 12px; line-height: 1.5; color: #506a90; }
@@ -69,19 +85,50 @@
 .picker-list > button.is-active { color: #2c5997; }
 .picker-list > button[aria-selected="true"] { font-weight: 600; }
 .picker-list > button:active { scale: none; }
-.picker-highlight { left: 4px; width: calc(100% - 8px); }
+.picker-highlight { left: 4px; width: calc(100% - 8px); z-index: 0; border-radius: 11px; }
 .picker-empty { padding: 16px 10px; font-size: 12px; color: #7185a3; line-height: 1.7; }
 
-.liquid-overlay { opacity: 0; transition: opacity .26s ease; }
-.liquid-overlay[data-state="open"] { opacity: 1; }
+.liquid-overlay { opacity: 1; background: #283b5b00; backdrop-filter: blur(0px); transition: background .38s, backdrop-filter .38s; }
+.liquid-overlay[data-state="open"] { background: #283b5b3d; backdrop-filter: blur(6px); }
 .liquid-overlay[data-state="closed"] { pointer-events: none; }
-.liquid-overlay > .drawer { animation: none; transform: translateX(44px) scale(.985); transform-origin: 100% 50%; transition: transform .26s cubic-bezier(.22, 1, .36, 1); }
-.liquid-overlay[data-state="open"] > .drawer { transform: translateX(0) scale(1); }
-.liquid-overlay > .confirm-dialog { transform: translateY(16px) scale(.95); transition: transform .26s cubic-bezier(.22, 1, .36, 1); }
-.liquid-overlay[data-state="open"] > .confirm-dialog { transform: translateY(0) scale(1); }
-.liquid-popover { opacity: 0; transform: translateY(-7px) scale(.97); transform-origin: 100% 0%; transition: transform .26s cubic-bezier(.22, 1, .36, 1), opacity .22s; }
-.liquid-popover[data-state="open"] { opacity: 1; transform: translateY(0) scale(1); }
+.liquid-overlay > .drawer { animation: none; border-radius: 28px 0 0 28px; transform: translateX(100%) scale(.96); transform-origin: 100% 50%; transition: transform .38s cubic-bezier(.22, 1, .36, 1), border-radius .38s; }
+.liquid-overlay[data-state="open"] > .drawer { transform: translateX(0) scale(1); border-radius: 0; }
+.liquid-overlay > .confirm-dialog { visibility: hidden; transform: translateY(24px) scale(.88); transition: transform .38s cubic-bezier(.2, 1.12, .3, 1), visibility 0s .38s; }
+.liquid-overlay[data-state="open"] > .confirm-dialog { visibility: visible; transform: translateY(0) scale(1); transition-delay: 0s; }
+.liquid-popover { visibility: hidden; transform: translateY(-16px) scale(.8); transform-origin: 100% 0%; transition: transform .38s cubic-bezier(.2, 1.12, .3, 1), visibility 0s .38s; }
+.liquid-popover[data-state="open"] { visibility: visible; transform: translateY(0) scale(1); transition-delay: 0s; }
 .liquid-popover[data-state="closed"] { pointer-events: none; }
+
+/* Native inputs remain focusable and labelled; visual glass never duplicates an accessible control. */
+.liquid-toggle { position: relative; min-height: 36px; gap: 10px; color: #506585; line-height: 1.6; }
+.liquid-toggle > input { position: absolute; width: 1px; height: 1px; padding: 0; opacity: 0; }
+.liquid-toggle-track { position: relative; flex: 0 0 50px; height: 30px; border-radius: 999px; touch-action: pan-y; background: #8295ae4d; box-shadow: inset 0 1px 3px #233f6a24, 0 1px 0 #ffffffb3; transition: background .28s; }
+.liquid-toggle[data-checked="true"] .liquid-toggle-track { background: #30ba69; }
+.toggle-state-on, .toggle-state-off { position: absolute; top: 11px; pointer-events: none; }
+.toggle-state-on { left: 11px; width: 2px; height: 8px; background: #ffffffa6; border-radius: 1px; }
+.toggle-state-off { right: 10px; width: 8px; height: 8px; border: 1px solid #ffffffbf; border-radius: 50%; }
+.liquid-toggle-thumb { display: block; position: absolute; z-index: 1; top: 2px; left: 2px; width: 26px; height: 26px; border-radius: 999px; border: 1px solid #ffffffd9; transform: translateX(calc(var(--toggle-progress) * 20px)); box-shadow: 0 2px 5px #19304d3b, inset 0 1px 0 white; transition: transform .38s cubic-bezier(.2, 1.35, .35, 1); }
+.liquid-toggle-thumb::before { background: linear-gradient(160deg, #ffffff85, #ffffff26 55%, #ffffff70); backdrop-filter: var(--glass-refraction, blur(3px) saturate(1.35)); }
+.liquid-toggle[data-dragging] .liquid-toggle-thumb { transform: translateX(calc(var(--toggle-progress) * 20px)) scale(1.12, .94); transition: transform .06s linear; }
+.toggle-label { flex: 1; }
+.liquid-toggle:has(input:focus-visible) .liquid-toggle-track, .liquid-toggle:has(input:focus-visible) .liquid-check-mark { outline: 2px solid #4f87df; outline-offset: 3px; }
+.liquid-toggle:has(input:disabled) { cursor: not-allowed; opacity: .5; }
+.liquid-check-mark { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: 8px; border: 1px solid #91aed485; box-shadow: inset 0 1px 0 white, 0 2px 5px #254c7512; transition: border-color .25s, scale .25s; }
+.liquid-check-mark::before { background: #ffffff40; backdrop-filter: var(--glass-refraction, blur(3px)); transition: background .25s; }
+.liquid-check-mark > svg { color: white; stroke-width: 3; stroke-dasharray: 24; stroke-dashoffset: 24; opacity: 0; transform: scale(.65); transition: stroke-dashoffset .28s, opacity .18s, transform .38s cubic-bezier(.2, 1.4, .35, 1); }
+.liquid-toggle[data-checked="true"] .liquid-check-mark { border-color: #538ce5; }
+.liquid-toggle[data-checked="true"] .liquid-check-mark::before { background: #4e8ce5d9; }
+.liquid-toggle[data-checked="true"] .liquid-check-mark > svg { stroke-dashoffset: 0; opacity: 1; transform: scale(1); }
+.liquid-toggle.confirmation:active .liquid-check-mark { scale: .92; }
+
+.disclosure-trigger { display: flex; align-items: center; gap: 7px; width: 100%; padding: 5px 0; border: 0; background: transparent; color: #617c9f; font: inherit; font-size: 10px; text-align: left; }
+.disclosure-trigger > svg:last-child { margin-left: auto; transition: transform .38s cubic-bezier(.2, 1.2, .3, 1); }
+.liquid-disclosure[data-open="true"] .disclosure-trigger > svg:last-child { transform: rotate(180deg); }
+.disclosure-grid { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .38s cubic-bezier(.22, 1, .36, 1); }
+.liquid-disclosure[data-open="true"] .disclosure-grid { grid-template-rows: 1fr; }
+.disclosure-content { min-height: 0; overflow: hidden; visibility: hidden; transition: visibility 0s .38s; }
+.liquid-disclosure[data-open="true"] .disclosure-content { visibility: visible; transition-delay: 0s; }
+.disclosure-content > .form-stack { padding-top: 17px; }
 
 @media (max-width: 760px) {
     .device-switch > .glass-picker { width: 115px; }
@@ -89,9 +136,16 @@
 
 @media (prefers-reduced-motion: reduce) {
     .liquid-indicator { transform: translate3d(var(--liquid-x, 0px), var(--liquid-y, 0px), 0); }
+    .liquid-toggle[data-dragging] .liquid-toggle-thumb { transform: translateX(calc(var(--toggle-progress) * 20px)); }
+    .liquid-toggle.confirmation:active .liquid-check-mark { scale: none; }
+    .picker-position, .picker-window, .picker-window::before, .picker-heading, .picker-list, .liquid-overlay, .liquid-overlay > .drawer,
+    .liquid-overlay > .confirm-dialog, .liquid-popover, .liquid-toggle-track, .liquid-toggle-thumb, .liquid-check-mark,
+    .liquid-check-mark::before, .liquid-check-mark > svg, .disclosure-grid, .disclosure-content, .disclosure-trigger > svg { transition: none; }
 }
 @media (forced-colors: active) {
     .liquid-indicator { background: Highlight; border-color: Highlight; }
     .liquid-segments > button.selected, .picker-list > button.is-active { color: HighlightText; }
     .picker-window { background: Canvas; border: 1px solid CanvasText; }
+    .liquid-toggle > input { position: static; width: 18px; height: 18px; opacity: 1; }
+    .liquid-toggle-track, .liquid-check-mark { display: none; }
 }

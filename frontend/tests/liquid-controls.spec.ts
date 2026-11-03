@@ -31,17 +31,28 @@ test('mouse lens follows the drag and commits exactly once on release', async ({
     await expect(group.locator('.liquid-indicator')).toHaveAttribute('data-glass', 'refractive');
 });
 
-test('hover previews and cancelled drags do not change the selected option', async ({ page }) => {
+test('hover leaves the lens in place and cancelled drags restore the selected option', async ({ page }) => {
     await ready(page);
     const group = page.getByRole('group', { name: '电脑网络角色' });
+    const lens = group.locator('.liquid-indicator');
+    const width = await group.getByRole('button', { name: 'TCP 服务端', exact: true }).evaluate(element => element.offsetWidth);
+    await expect(lens).toHaveCSS('width', `${width}px`);
+    await lens.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
+    const original = (await lens.boundingBox())!;
     await group.getByRole('button', { name: 'UDP', exact: true }).hover();
+    expect(await lens.boundingBox()).toEqual(original);
     await expect(group.getByRole('button', { name: 'TCP 服务端' })).toHaveAttribute('aria-pressed', 'true');
+    await group.getByRole('button', { name: 'TCP 客户端', exact: true }).hover();
+    expect(Math.abs((await lens.boundingBox())!.x - original.x)).toBeLessThan(.5);
     const box = (await group.boundingBox())!;
     await page.mouse.down();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await group.evaluate(element => element.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 1 })));
     await page.mouse.up();
     await expect(group.getByRole('button', { name: 'TCP 服务端' })).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(async () => Math.abs((await lens.boundingBox())!.x - original.x)).toBeLessThan(.5);
+    await group.getByRole('button', { name: 'UDP', exact: true }).hover();
+    expect(Math.abs((await lens.boundingBox())!.x - original.x)).toBeLessThan(.5);
     expect(await page.evaluate(() => (window as any).__calls.filter((call: any[]) => call[0] === 'update_settings'))).toHaveLength(0);
     await group.getByRole('button', { name: 'TCP 服务端' }).focus();
     await page.keyboard.press('End');
@@ -53,6 +64,9 @@ test('native-valued selects open a glass list and Escape closes only that list',
     const device = page.getByLabel('当前设备', { exact: true });
     await device.click();
     await expect(page.getByRole('listbox', { name: '当前设备选项', exact: true })).toBeVisible();
+    const active = await device.getAttribute('aria-activedescendant');
+    await page.getByRole('option', { name: 'ESP32-S3', exact: true }).hover();
+    await expect(device).toHaveAttribute('aria-activedescendant', active!);
     await page.getByRole('listbox', { name: '当前设备选项', exact: true }).getByRole('option', { name: 'ESP32-S3', exact: true }).click();
     await expect(device).toHaveValue('s3');
     await expect(device).toBeFocused();

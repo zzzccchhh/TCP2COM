@@ -13,14 +13,28 @@ behaviour with a React lifecycle. Changes include aspect-aware geometry, bounded
 raster resolution, signed displacement normalization, a named SVG map result,
 size caching, explicit cleanup and a frosted fallback for large touch surfaces
 or unsupported engines. Small moving control lenses keep their bounded raster
-and refraction on supported touch Chromium. Optical filters only affect
-decorative backgrounds. CSS provides press/rebound and light effects.
+and refraction on supported touch Chromium. Small lenses use the rounded SDF's
+edge normal with a narrow, low-blur rim; the flat centre stays transparent.
+Segment labels paint below the shared lens so its backdrop includes actual
+text detail, while panel text and form inputs stay outside their optical layers.
+CSS provides press/rebound and light effects.
 
-`LiquidSegments` uses one shared lens per group, pointer capture, local drag
-previews and a single change on release. `GlassPicker` renders a portal listbox
+`LiquidSegments` uses one shared lens per group, pointer capture after a primary
+press, local drag previews and a single change on release. Hover does not move
+the lens or the picker highlight. `GlassPicker` renders a portal listbox
 with the native form value and focus, and editable suggestions for COM/baud.
 `usePresence` retains overlays through reversible entrance/exit transitions.
 These controls use the existing engine and CSS; no animation dependency is added.
+
+`LiquidToggle` retains a native labelled checkbox (switch role for boolean
+settings), with pointer capture and a single commit on release. Confirmation
+checkboxes keep checkbox semantics. `LiquidDisclosure` animates grid height while
+keeping collapsed fields inert and preserving their values. Menus derive their
+initial transform from the trigger rectangle. On exit, only the optical sheet
+collapses toward the nearest menu edge; labels stay full-size and the menu never
+scales back over its trigger. Overlay ancestors stay opaque so
+opacity does not create a temporary backdrop root during the morph; the backdrop
+color, geometry and individual content layers provide the transition instead.
 
 No CDN, remote image or runtime download is required. Update this commit and
 recheck the browser/WebView2 rendering when changing the upstream implementation.

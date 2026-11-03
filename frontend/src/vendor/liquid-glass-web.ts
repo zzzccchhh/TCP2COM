@@ -31,7 +31,7 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
     const id = `liquid-glass-${++sequence}`;
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.classList.add('liquid-glass-defs');
-    const control = element.classList.contains('liquid-indicator');
+    const control = element.matches('.liquid-indicator, .liquid-toggle-thumb, .liquid-check-mark');
     svg.dataset.glassKind = control ? 'control' : 'surface';
     svg.setAttribute('width', '0');
     svg.setAttribute('height', '0');
@@ -91,17 +91,23 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
             canvas.height = h;
             const data = context.createImageData(w, h);
             const raw = new Float32Array(w * h * 2);
-            const edge = Math.min(22, Math.min(width, height) * .22);
+            const edge = Math.min(22, Math.min(width, height) * (control ? .24 : .22));
             let extent = 0;
             for (let i = 0; i < w * h; i++) {
                 const x = ((i % w) + .5) / w * width - width / 2;
                 const y = (Math.floor(i / w) + .5) / h * height - height / 2;
                 const distance = roundedRectSDF(x, y, width / 2, height / 2, radius);
                 const field = smoothStep(-edge, 0, distance);
-                // Keep upstream's flat centre and bent edge, using actual aspect ratio and pixel strength.
-                const scale = 1 - smoothStep(0, 1, field) * 7 / Math.max(1, Math.hypot(x, y));
-                const dx = x * scale - x;
-                const dy = y * scale - y;
+                // Small lenses bend perpendicular to their rim, including the long, flat sides.
+                // A radial vector makes those sides almost horizontal on a wide segmented control.
+                const nx = control ? roundedRectSDF(x + .5, y, width / 2, height / 2, radius)
+                    - roundedRectSDF(x - .5, y, width / 2, height / 2, radius) : x;
+                const ny = control ? roundedRectSDF(x, y + .5, width / 2, height / 2, radius)
+                    - roundedRectSDF(x, y - .5, width / 2, height / 2, radius) : y;
+                const strength = control ? Math.min(6, height * .16) : 7;
+                const bend = smoothStep(0, 1, field) * strength / Math.max(.001, Math.hypot(nx, ny));
+                const dx = -nx * bend;
+                const dy = -ny * bend;
                 raw[i * 2] = dx;
                 raw[i * 2 + 1] = dy;
                 extent = Math.max(extent, Math.abs(dx), Math.abs(dy));
@@ -122,7 +128,7 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
             image.setAttribute('href', canvas.toDataURL());
             displacement.setAttribute('scale', String(extent * 2));
             if (!svg.isConnected) document.body.append(svg);
-            element.style.setProperty('--glass-refraction', `url("#${id}") blur(${control ? 1.5 : 12}px) saturate(1.35)`);
+            element.style.setProperty('--glass-refraction', `url("#${id}") blur(${control ? .15 : 12}px) saturate(1.35)`);
             element.dataset.glass = 'refractive';
             lastSize = key;
         } catch {
@@ -133,6 +139,9 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
 
     function schedule() {
         if (!disposed && !frame) frame = requestAnimationFrame(update);
+    }
+    function transitionEnd(event: TransitionEvent) {
+        if (event.target === element && event.propertyName === 'border-radius') schedule();
     }
 
     function move(event: PointerEvent) {
@@ -162,6 +171,7 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
     reduced.addEventListener('change', preferenceChanged);
     element.addEventListener('pointermove', move);
     element.addEventListener('pointerleave', leave);
+    element.addEventListener('transitionend', transitionEnd);
     // Hidden WebView2 windows suspend animation frames. Initialize once even before showing.
     update();
 
@@ -175,6 +185,7 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
         reduced.removeEventListener('change', preferenceChanged);
         element.removeEventListener('pointermove', move);
         element.removeEventListener('pointerleave', leave);
+        element.removeEventListener('transitionend', transitionEnd);
         reset();
         delete element.dataset.glass;
     };
