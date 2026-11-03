@@ -36,10 +36,20 @@ constrained width and position before attaching optics. Their readiness callback
 waits for the displacement bitmap to decode; the initial highlight is laid out
 without transitions. Opening and closing then animate the same optical sheet
 with the same duration and easing, while text is revealed/clipped at full size.
+The sampling surface stays fixed; its clip rectangle reveals the material.
 The wrapper never scales or covers its trigger, and interrupted transitions
 resume without a repeated text delay. Overlay ancestors stay opaque so
 opacity does not create a temporary backdrop root during the morph; the backdrop
 color, geometry and individual content layers provide the transition instead.
+
+Touch layouts include tablets above the phone breakpoint. Large panes use a
+lighter material, the modal shade has a fixed blur and fades as a sibling of
+the dialog, and touch drawer reveals do not move a filtered surface. Touch menu
+highlights avoid transient SVG allocations; draggable segmented lenses retain
+refraction. `useExitBounds` freezes a closing rectangle, while the LAN popover
+also retains its displayed content. Transition completion releases retained
+nodes with a timeout fallback; reopening cancels cleanup. Focus returns without
+scrolling and without stealing it from another dialog.
 
 No CDN, remote image or runtime download is required. Update this commit and
 recheck the browser/WebView2 rendering when changing the upstream implementation.

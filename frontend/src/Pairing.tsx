@@ -1,12 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { call } from './api';
 import GlassSurface from './GlassSurface';
 import { usePresence } from './usePresence';
+import { useExitBounds } from './useExitBounds';
+import { useReturnFocus } from './useReturnFocus';
 import { autoConnect, defaultTerminalName, disconnect, getLANStatus, isLAN, normalizeAddress, retryConnection, serviceAddress } from './lan';
 
 export default function Pairing() {
     const [open, setOpen] = useState(false);
-    const panelMotion = usePresence(open ? true : null);
+    const [opticsReady, setOpticsReady] = useState(false);
+    const [closingContent, setClosingContent] = useState<ReactNode>(null);
+    const panelMotion = usePresence(open ? true : null, 380, opticsReady);
+    const panel = useRef<HTMLElement>(null);
+    const trigger = useRef<HTMLButtonElement>(null);
+    const panelId = useId();
+    useExitBounds(open, panelMotion.present, panel);
+    useReturnFocus(panelMotion.present, trigger);
+    useLayoutEffect(() => {
+        if (!panelMotion.present) { setOpticsReady(false); setClosingContent(null); }
+    }, [panelMotion.present]);
     const [address, setAddress] = useState(serviceAddress);
     const [name, setName] = useState(defaultTerminalName);
     const [status, setStatus] = useState(getLANStatus);
@@ -33,12 +46,13 @@ export default function Pairing() {
         try { location.assign(normalizeAddress(address) + '/'); } catch (error) { setMessage(String(error)); }
     }
     const busy = status.state === 'connecting';
-    return <div className="lan-entry">
-        <button className="button" onClick={() => { setOpen(!open); if (isLAN()) void refresh(); }}>局域网连接</button>
-        {status.state !== 'idle' && <span className={`lan-connection-state ${status.state}`} role="status" aria-label="服务连接状态">{status.state === 'connected' ? '服务已连接' : status.message}</span>}
-        {panelMotion.present && <GlassSurface className="panel lan-panel liquid-popover" aria-label="局域网连接"
-            data-state={panelMotion.entered ? 'open' : 'closed'} aria-hidden={!open || undefined} inert={!open}>
-            <div className="panel-title">局域网多端控制<button className="icon-button" aria-label="关闭连接面板" onClick={() => setOpen(false)}>×</button></div>
+    function closePanel() {
+        if (!open) return;
+        setClosingContent(content);
+        setOpen(false);
+    }
+    const content = <>
+            <div className="panel-title">局域网多端控制<button className="icon-button" aria-label="关闭连接面板" onClick={closePanel}>×</button></div>
             <p>服务端的打开网页、复制网址或二维码均可自动连接。首次使用请打开完整连接链接；局域网工作台可直接访问。</p>
             <form onSubmit={e => { e.preventDefault(); void connect(); }}>
                 <label className="field"><span className="field-label">服务地址</span><input aria-label="服务地址" placeholder="192.168.1.100:8765" disabled={busy} value={address} onChange={e => setAddress(e.target.value)} required /></label>
@@ -52,6 +66,22 @@ export default function Pairing() {
                     try { await call('revoke', peer.id); if (peer.self) disconnect(); else await refresh(); } catch (error) { setMessage(String(error)); }
                 }}>撤销连接</button></li>)}</ul></>}
             <p>网页仅自动连接服务，不会自动启动串口桥接或 USB。关闭网页不会停止桥接。</p>
+    </>;
+    return <div className="lan-entry">
+        <button ref={trigger} className="button" aria-expanded={open} aria-controls={panelMotion.present ? panelId : undefined}
+            onClick={() => {
+                if (open) closePanel();
+                else { setClosingContent(null); setOpen(true); if (isLAN()) void refresh(); }
+            }}>局域网连接</button>
+        {status.state !== 'idle' && <span className={`lan-connection-state ${status.state}`} role="status" aria-label="服务连接状态">{status.state === 'connected' ? '服务已连接' : status.message}</span>}
+        {panelMotion.present && <GlassSurface surfaceRef={panel} className="panel lan-panel liquid-popover" aria-label="局域网连接"
+            id={panelId} data-ready={opticsReady || undefined} onGlassReady={() => setOpticsReady(true)}
+            data-state={panelMotion.entered ? 'open' : 'closed'} aria-hidden={!open || undefined} inert={!open}
+            onTransitionEnd={event => {
+                if (!open && event.target === event.currentTarget && event.pseudoElement === '::before'
+                    && event.propertyName === 'clip-path') panelMotion.finishExit();
+            }}>
+            <div className="popover-content">{open ? content : closingContent ?? content}</div>
         </GlassSurface>}
     </div>;
 }

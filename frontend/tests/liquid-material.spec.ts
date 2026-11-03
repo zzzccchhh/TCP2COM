@@ -6,6 +6,13 @@ async function ready(page: Page) {
     await installBridge(page);
     await page.goto('/');
     await expect(page.getByText('本地运行', { exact: true })).toHaveCount(1);
+    await page.evaluate(() => {
+        (window as any).__glassReveal = (element: Element) => {
+            const edges = getComputedStyle(element, '::before').clipPath.slice(6).split('round')[0]
+                .replace(')', '').trim().split(/\s+/).map(value => parseFloat(value));
+            return 1 - (edges[0] + (edges[2] ?? edges[0])) / 100;
+        };
+    });
 }
 
 for (const action of ['escape', 'selection'] as const) test(`COM text stays sharp throughout menu exit by ${action}`, async ({ page }) => {
@@ -27,7 +34,7 @@ for (const action of ['escape', 'selection'] as const) test(`COM text stays shar
         for (let i = 0; i < 6; i++) {
             await new Promise(requestAnimationFrame);
             frames.push({ scale: new DOMMatrixReadOnly(getComputedStyle(element).transform).d,
-                glass: new DOMMatrixReadOnly(getComputedStyle(element.querySelector('.picker-window')!, '::before').transform).d,
+                glass: (window as any).__glassReveal(element.querySelector('.picker-window')),
                 textHeight: element.querySelector('.picker-list button')!.getBoundingClientRect().height });
         }
         return frames;
@@ -167,7 +174,7 @@ test('menus animate one glass sheet and confirmation focus waits for the visible
         for (let i = 0; i < 5; i++) {
             await new Promise(requestAnimationFrame);
             frames.push({ width: element.getBoundingClientRect().width,
-                sheet: new DOMMatrixReadOnly(getComputedStyle(element.querySelector('.picker-window')!, '::before').transform).d });
+                sheet: (window as any).__glassReveal(element.querySelector('.picker-window')) });
         }
         return frames;
     });
@@ -261,7 +268,7 @@ test('quick reversals continue the current glass and text progress without an op
         for (let i = 0; i < 10; i++) {
             await new Promise(requestAnimationFrame);
             frames.push({ opacity: parseFloat(getComputedStyle(text).opacity),
-                sheet: new DOMMatrixReadOnly(getComputedStyle(glass, '::before').transform).d,
+                sheet: (window as any).__glassReveal(glass),
                 delay: getComputedStyle(text).transitionDelay });
         }
         return { before, entering, exiting, frames };

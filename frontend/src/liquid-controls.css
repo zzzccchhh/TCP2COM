@@ -73,11 +73,10 @@
     background: linear-gradient(135deg, #ffffffb8, #edf4ff8c 55%, #f3f0ff9c);
     border: 1px solid #ffffffcf;
     box-shadow: 0 14px 45px #2c477d38, inset 0 1px 0 white;
-    transform: scaleY(0);
-    transform-origin: 50% var(--picker-edge, 0%);
+    clip-path: inset(var(--picker-clip-top, 0%) 0 var(--picker-clip-bottom, 100%) 0 round 20px);
 }
-.picker-position[data-ready] .picker-window::before { transition: transform var(--picker-duration) var(--picker-easing); }
-.picker-position[data-state="open"] .picker-window::before { transform: scaleY(1); }
+.picker-position[data-ready] .picker-window::before { transition: clip-path var(--picker-duration) var(--picker-easing); }
+.picker-position[data-state="open"] .picker-window::before { clip-path: inset(0 0 0 0 round 20px); }
 .picker-content { display: flex; flex-direction: column; min-height: 0; opacity: 0; clip-path: inset(var(--picker-clip-top, 0%) 0 var(--picker-clip-bottom, 100%) 0); }
 .picker-position[data-ready] .picker-content { transition: opacity var(--picker-duration) var(--picker-easing), clip-path var(--picker-duration) var(--picker-easing); }
 .picker-position[data-state="open"] .picker-content { opacity: 1; clip-path: inset(0 0 0 0); }
@@ -94,15 +93,24 @@
 .picker-position:not([data-ready]) .picker-highlight { transition: none; }
 .picker-empty { padding: 16px 10px; font-size: 12px; color: #7185a3; line-height: 1.7; }
 
-.liquid-overlay { opacity: 1; background: #283b5b00; backdrop-filter: blur(0px); transition: background .38s, backdrop-filter .38s; }
-.liquid-overlay[data-state="open"] { background: #283b5b3d; backdrop-filter: blur(6px); }
+.liquid-overlay { opacity: 1; isolation: isolate; background: transparent; backdrop-filter: none; }
+.overlay-shade { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: #283b5b3d; backdrop-filter: blur(6px); opacity: 0; transition: opacity .38s ease; }
+.liquid-overlay[data-state="open"] > .overlay-shade { opacity: 1; }
+.liquid-overlay > .glass-surface { z-index: 1; }
 .liquid-overlay[data-state="closed"] { pointer-events: none; }
+.liquid-overlay[data-state="closed"] .liquid-indicator { transition: none; }
 .liquid-overlay > .drawer { animation: none; border-radius: 28px 0 0 28px; transform: translateX(100%) scale(.96); transform-origin: 100% 50%; transition: transform .38s cubic-bezier(.22, 1, .36, 1), border-radius .38s; }
 .liquid-overlay[data-state="open"] > .drawer { transform: translateX(0) scale(1); border-radius: 0; }
 .liquid-overlay > .confirm-dialog { visibility: hidden; transform: translateY(24px) scale(.88); transition: transform .38s cubic-bezier(.2, 1.12, .3, 1), visibility 0s .38s; }
 .liquid-overlay[data-state="open"] > .confirm-dialog { visibility: visible; transform: translateY(0) scale(1); transition-delay: 0s; }
-.liquid-popover { visibility: hidden; transform: translateY(-16px) scale(.8); transform-origin: 100% 0%; transition: transform .38s cubic-bezier(.2, 1.12, .3, 1), visibility 0s .38s; }
-.liquid-popover[data-state="open"] { visibility: visible; transform: translateY(0) scale(1); transition-delay: 0s; }
+.liquid-popover { visibility: hidden; border-color: transparent; box-shadow: none; transition: visibility 0s .38s, box-shadow .38s cubic-bezier(.22, 1, .36, 1); }
+.liquid-popover::before { border: 1px solid #ffffffcf; clip-path: inset(0 0 100% 0 round 20px); }
+.popover-content { opacity: 0; clip-path: inset(0 0 100% 0); }
+.liquid-popover[data-ready]::before { transition: clip-path .38s cubic-bezier(.22, 1, .36, 1); }
+.liquid-popover[data-ready] > .popover-content { transition: opacity .38s cubic-bezier(.22, 1, .36, 1), clip-path .38s cubic-bezier(.22, 1, .36, 1); }
+.liquid-popover[data-state="open"] { visibility: visible; box-shadow: 0 16px 60px #20251b30; transition-delay: 0s; }
+.liquid-popover[data-state="open"]::before { clip-path: inset(0 0 0 0 round 20px); }
+.liquid-popover[data-state="open"] > .popover-content { opacity: 1; clip-path: inset(0 0 0 0); }
 .liquid-popover[data-state="closed"] { pointer-events: none; }
 
 /* Native inputs remain focusable and labelled; visual glass never duplicates an accessible control. */
@@ -140,12 +148,21 @@
     .device-switch > .glass-picker { width: 115px; }
 }
 
+@media (hover: none), (pointer: coarse) {
+    /* Reveal the pane without moving a large filtered sampling surface across the page. */
+    .liquid-overlay > .drawer { transform: none; border-radius: 20px 0 0 20px; clip-path: inset(0 0 0 100% round 20px 0 0 20px); transition: clip-path .38s cubic-bezier(.22, 1, .36, 1); }
+    .liquid-overlay[data-state="open"] > .drawer { clip-path: inset(0 0 0 0 round 20px 0 0 20px); }
+    .liquid-overlay .drawer::before, .liquid-overlay .confirm-dialog::before, .liquid-popover.glass-surface::before { -webkit-backdrop-filter: none; backdrop-filter: none; }
+    .picker-window.glass-surface::before { -webkit-backdrop-filter: blur(8px) saturate(1.2); backdrop-filter: blur(8px) saturate(1.2); }
+    .picker-highlight.glass-surface::before { -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .liquid-indicator { transform: translate3d(var(--liquid-x, 0px), var(--liquid-y, 0px), 0); }
     .liquid-toggle[data-dragging] .liquid-toggle-thumb { transform: translateX(calc(var(--toggle-progress) * 20px)); }
     .liquid-toggle.confirmation:active .liquid-check-mark { scale: none; }
-    .picker-position, .picker-window, .picker-window::before, .picker-content, .liquid-overlay, .liquid-overlay > .drawer,
-    .liquid-overlay > .confirm-dialog, .liquid-popover, .liquid-toggle-track, .liquid-toggle-thumb, .liquid-check-mark,
+    .picker-position, .picker-window, .picker-window::before, .picker-content, .liquid-overlay, .overlay-shade, .liquid-overlay > .drawer,
+    .liquid-overlay > .confirm-dialog, .liquid-popover, .liquid-popover::before, .popover-content, .liquid-toggle-track, .liquid-toggle-thumb, .liquid-check-mark,
     .liquid-check-mark::before, .liquid-check-mark > svg, .disclosure-grid, .disclosure-content, .disclosure-trigger > svg { transition: none; }
 }
 @media (forced-colors: active) {

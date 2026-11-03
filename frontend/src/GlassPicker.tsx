@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
 import GlassSurface from './GlassSurface';
 import { usePresence } from './usePresence';
+import { useExitBounds } from './useExitBounds';
 
 type Props = {
     label: string; value: string | number; onChange: (value: string) => void;
@@ -22,6 +23,7 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
     const [opticsReady, setOpticsReady] = useState(false);
     const prepared = positioned && opticsReady;
     const presence = usePresence(open ? true : null, 380, prepared);
+    useExitBounds(open, presence.present, popup);
     const [active, setActive] = useState(0);
     const [query, setQuery] = useState('');
     const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
@@ -57,6 +59,7 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
     useLayoutEffect(() => {
         if (!presence.present) return;
         function place() {
+            if (!open) return;
             const rect = trigger.current?.getBoundingClientRect();
             if (!rect) return;
             const viewport = window.visualViewport;
@@ -117,7 +120,11 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
         const button = optionNodes.current[Math.min(active, shown.length - 1)];
         if (button) {
             setHighlight({ top: button.offsetTop, height: button.offsetHeight });
-            button.scrollIntoView({ block: 'nearest' });
+            const listbox = button.parentElement!;
+            if (button.offsetTop < listbox.scrollTop) listbox.scrollTop = button.offsetTop;
+            else if (button.offsetTop + button.offsetHeight > listbox.scrollTop + listbox.clientHeight) {
+                listbox.scrollTop = button.offsetTop + button.offsetHeight - listbox.clientHeight;
+            }
         }
     }, [open, active, query, shown.length]);
 
@@ -162,7 +169,10 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             style={position} data-state={presence.entered ? 'open' : 'closed'} data-ready={prepared || undefined}
             aria-hidden={!open || undefined} inert={!open}>
             <GlassSurface className="picker-window" aria-label={`${label}选项`} opticsEnabled={positioned}
-                onGlassReady={() => setOpticsReady(true)}>
+                onGlassReady={() => setOpticsReady(true)} onTransitionEnd={event => {
+                    if (!open && event.target === event.currentTarget && event.pseudoElement === '::before'
+                        && event.propertyName === 'clip-path') presence.finishExit();
+                }}>
                 <div className="picker-content">
                     <div className="picker-heading">{label}</div>
                     <div className="picker-list" role="listbox" id={id} aria-label={`${label}选项`}>

@@ -167,6 +167,13 @@ button:active:not(:disabled) { scale: .97 .94; }
     .drawer { border-radius: 20px 0 0 20px; }
     .lan-panel { position: fixed; }
 }
+@media (hover: none), (pointer: coarse) {
+    body { background-attachment: scroll; }
+    .glass-surface[data-glass="frosted"]::before, .panel:not(.glass-surface) {
+        -webkit-backdrop-filter: blur(12px) saturate(1.2);
+        backdrop-filter: blur(12px) saturate(1.2);
+    }
+}
 @media (prefers-reduced-motion: reduce) {
     button:active:not(:disabled) { scale: none; }
     .glass-surface::before { background: linear-gradient(145deg, #ffffffcc, #f5f8ffb3); }

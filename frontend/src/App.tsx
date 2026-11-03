@@ -15,6 +15,7 @@ import LiquidSegments from './LiquidSegments';
 import Toggle from './LiquidToggle';
 import LiquidDisclosure from './LiquidDisclosure';
 import { usePresence } from './usePresence';
+import { useReturnFocus } from './useReturnFocus';
 import { getLANStatus, isLAN } from './lan';
 
 type FieldProps = {
@@ -79,6 +80,9 @@ export default function App() {
     const [confirm, setConfirm] = useState<Data | null>(null);
     const drawerMotion = usePresence(drawer);
     const confirmMotion = usePresence(confirm);
+    const overlayPresent = drawerMotion.present || confirmMotion.present;
+    useReturnFocus(drawerMotion.present);
+    useReturnFocus(confirmMotion.present);
     const shownDrawer = drawerMotion.value;
     const shownConfirm = confirmMotion.value;
     const [resetHost, setResetHost] = useState('');
@@ -176,26 +180,34 @@ export default function App() {
     }, [confirmMotion.present]);
     useEffect(() => { window.dispatchEvent(new Event('workspace-overlay-change')); }, [drawer, confirm]);
     useEffect(() => {
-        document.body.style.overflow = drawerMotion.present || confirmMotion.present ? 'hidden' : '';
-        const previousFocus = document.activeElement as HTMLElement | null;
-        const modal = document.querySelector(confirmMotion.present ? '.confirm-dialog' : '.drawer') as HTMLElement | null;
+        if (!overlayPresent) return;
+        const previousOverflow = document.body.style.overflow, previousPadding = document.body.style.paddingRight;
+        const gutter = innerWidth - document.documentElement.clientWidth;
+        if (gutter > 0) document.body.style.paddingRight = `${parseFloat(getComputedStyle(document.body).paddingRight) + gutter}px`;
+        document.body.style.overflow = 'hidden';
         const selector = 'button:not(:disabled), input:not(:disabled):not([hidden]), select:not(:disabled), [tabindex="0"]';
-        modal?.querySelector<HTMLElement>(selector)?.focus();
         function trap(event: KeyboardEvent) {
+            const modal = document.querySelector('.modal-backdrop[data-state="open"] .confirm-dialog')
+                ?? document.querySelector('.drawer-backdrop[data-state="open"] .drawer');
             if (event.key !== 'Tab' || !modal) return;
             const controls = [...modal.querySelectorAll<HTMLElement>(selector)].filter(element => element.offsetParent !== null);
             const first = controls[0], last = controls.at(-1);
-            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            if (!modal.contains(document.activeElement)) { event.preventDefault(); (event.shiftKey ? last : first)?.focus({ preventScroll: true }); }
+            else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus({ preventScroll: true }); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus({ preventScroll: true }); }
         }
         window.addEventListener('keydown', trap);
-        return () => { document.body.style.overflow = ''; window.removeEventListener('keydown', trap); previousFocus?.focus(); };
-    }, [drawerMotion.present, confirmMotion.present, shownDrawer]);
+        return () => {
+            document.body.style.overflow = previousOverflow; document.body.style.paddingRight = previousPadding;
+            window.removeEventListener('keydown', trap);
+        };
+    }, [overlayPresent]);
     useEffect(() => {
         // A morphing dialog starts hidden; move focus after its entrance state becomes visible.
         if (!drawerMotion.entered && !confirmMotion.entered) return;
-        const modal = document.querySelector(confirmMotion.entered ? '.confirm-dialog' : '.drawer');
-        modal?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled)')?.focus();
+        const modal = confirmMotion.entered ? document.querySelector('.confirm-dialog')
+            : !confirmMotion.present ? document.querySelector('.drawer') : null;
+        modal?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled)')?.focus({ preventScroll: true });
     }, [drawerMotion.entered, confirmMotion.entered]);
 
     function change(key: string, value: any) {
@@ -419,7 +431,12 @@ export default function App() {
         <datalist id="serial-ports">{ports.map(port => <option key={port.device} value={port.device}>{port.description}</option>)}</datalist>
         <datalist id="baud-rates">{[9600, 115200, 460800, 921600, 1152000, 2000000, 3000000].map(value => <option key={value} value={value} />)}</datalist>
 
-        {shownDrawer && <div className="drawer-backdrop liquid-overlay" data-state={drawerMotion.entered ? 'open' : 'closed'} aria-hidden={!drawer || undefined} inert={!drawer} onClick={() => { if (!confirm) setDrawer(null); }}><GlassSurface className={`drawer ${shownDrawer === 'config' ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={{ config: '设备配置面板', diagnostics: '链路诊断', reset: '远程复位', help: '使用帮助' }[shownDrawer]} onClick={e => e.stopPropagation()}>
+        {shownDrawer && <div className="drawer-backdrop liquid-overlay" data-state={drawerMotion.entered ? 'open' : 'closed'} aria-hidden={!drawer || undefined} inert={!drawer} onClick={() => { if (!confirm) setDrawer(null); }}>
+            <div className="overlay-shade" aria-hidden="true" />
+            <GlassSurface className={`drawer ${shownDrawer === 'config' ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={{ config: '设备配置面板', diagnostics: '链路诊断', reset: '远程复位', help: '使用帮助' }[shownDrawer]} onClick={e => e.stopPropagation()}
+                onTransitionEnd={event => {
+                    if (!drawer && event.target === event.currentTarget && ['transform', 'clip-path'].includes(event.propertyName)) drawerMotion.finishExit();
+                }}>
             <div className="drawer-heading"><div><div className="eyebrow">{shownDrawer === 'config' ? 'DEVICE CONFIGURATION' : shownDrawer === 'diagnostics' ? 'LINK DIAGNOSTICS' : shownDrawer === 'reset' ? 'REMOTE RESET' : 'QUICK START'}</div><h2>{{ config: `${labels[device]} 设备配置`, diagnostics: '链路诊断', reset: '远程复位', help: '开始使用工作台' }[shownDrawer]}</h2></div><button className="icon-button" aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20} /></button></div>
             <div className="drawer-body">
                 {shownDrawer === 'config' && <>
@@ -481,7 +498,9 @@ export default function App() {
             {shownDrawer === 'config' && <div className="drawer-footer"><span><ShieldCheck size={14} />明确保存后写入设备 NVS</span><button className="button primary" disabled={waiting || !snap.baseline || (device === 'c5' && config.link_mode === -1)} onClick={() => run(async () => { const preview = await call<Data>('preview_save', config, passwords, clear); if (!preview.needed) notify('没有修改，无需保存'); else setConfirm({ ...preview, config: structuredClone(config), passwords: { ...passwords }, clear: [...clear] }); })}><Check size={15} />保存并重启</button></div>}
         </GlassSurface></div>}
 
-        {shownConfirm && <div className="modal-backdrop liquid-overlay" data-state={confirmMotion.entered ? 'open' : 'closed'} aria-hidden={!confirm || undefined} inert={!confirm}><GlassSurface className="confirm-dialog" role="dialog" aria-modal="true" aria-label="确认保存设备配置"><div className="confirm-icon"><Settings2 size={22} /></div><h2>保存配置并重启？</h2><p>以下修改将写入 {labels[device]} 的 NVS。<br />设备重启期间业务连接会中断。</p><div className="change-list">{shownConfirm.changes.length ? shownConfirm.changes.map((item: Data) => <div key={item.field}><span>{item.field}</span><strong>{item.value}</strong></div>) : <p>明确保存当前运行配置</p>}</div><div className="dialog-actions"><button className="button" disabled={working} onClick={() => setConfirm(null)}>取消</button><button className="button primary" disabled={working} onClick={() => run(async () => { const pending = shownConfirm; setConfirm(null); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await call('save_device', pending.config, pending.passwords, pending.clear, pending.epoch); notify('设备已确认保存并请求重启，请重新读取核对'); })}>{working && <LoaderCircle size={14} className="spin" />}确认保存并重启</button></div></GlassSurface></div>}
+        {shownConfirm && <div className="modal-backdrop liquid-overlay" data-state={confirmMotion.entered ? 'open' : 'closed'} aria-hidden={!confirm || undefined} inert={!confirm}><div className="overlay-shade" aria-hidden="true" /><GlassSurface className="confirm-dialog" role="dialog" aria-modal="true" aria-label="确认保存设备配置" onTransitionEnd={event => {
+            if (!confirm && event.target === event.currentTarget && ['transform', 'opacity'].includes(event.propertyName)) confirmMotion.finishExit();
+        }}><div className="confirm-icon"><Settings2 size={22} /></div><h2>保存配置并重启？</h2><p>以下修改将写入 {labels[device]} 的 NVS。<br />设备重启期间业务连接会中断。</p><div className="change-list">{shownConfirm.changes.length ? shownConfirm.changes.map((item: Data) => <div key={item.field}><span>{item.field}</span><strong>{item.value}</strong></div>) : <p>明确保存当前运行配置</p>}</div><div className="dialog-actions"><button className="button" disabled={working} onClick={() => setConfirm(null)}>取消</button><button className="button primary" disabled={working} onClick={() => run(async () => { const pending = shownConfirm; setConfirm(null); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await call('save_device', pending.config, pending.passwords, pending.clear, pending.epoch); notify('设备已确认保存并请求重启，请重新读取核对'); })}>{working && <LoaderCircle size={14} className="spin" />}确认保存并重启</button></div></GlassSurface></div>}
         {toast && <div className="toast" role="status"><Info size={16} /><span>{toast}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setToast('')}><X size={14} /></button></div>}
     </div>;
 }

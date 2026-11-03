@@ -77,7 +77,9 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
         frame = 0;
         if (disposed) return;
         // Small moving controls retain refraction on touch screens; large panels use the lighter fallback.
-        if (!context || (!control && (compact.matches || !fine.matches))) { reset(); onReady?.(); return; }
+        // Touch menu highlights are static glass; avoid allocating global SVG resources for each popup.
+        if (!context || (!control && (compact.matches || !fine.matches))
+            || (!fine.matches && element.classList.contains('picker-highlight'))) { reset(); onReady?.(); return; }
         const width = element.offsetWidth;
         const height = element.offsetHeight;
         if (width < 2 || height < 2) { reset(); return; }
