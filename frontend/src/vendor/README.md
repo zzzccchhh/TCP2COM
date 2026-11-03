@@ -91,5 +91,18 @@ appearance separately from device state. Native writes are serialized, storage
 errors leave the current appearance usable, and system events apply only when
 selected. This does not enable persistence for the whole WebView profile.
 
+`SlidingContent` animates only committed segment changes, never pointer previews.
+It snapshots the outgoing DOM before React mutates it, copying form values and
+scroll positions into a closed, inert shadow tree with stylesheet context. The
+copy has no React handlers or effects and cannot duplicate live form queries.
+Ancestor shells preserve contextual selectors without painted layout boxes;
+outgoing optics use static material rather than duplicate global SVG resources.
+Incoming and outgoing pages translate for 270ms with height interpolation, and
+rapid reversals reuse the current visual position. Per-page scroll offsets are
+restored; reduced motion and unmount immediately clean up animations and copies.
+Large optical surfaces defer size-map updates during these transitions and
+refresh on the bubbling completion event. Selected button focus uses the lens
+rim instead of a second rectangular outline that touch Chromium could refract.
+
 No CDN, remote image or runtime download is required. Update this commit and
 recheck the browser/WebView2 rendering when changing the upstream implementation.

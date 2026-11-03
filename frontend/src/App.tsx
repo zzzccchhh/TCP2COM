@@ -12,6 +12,7 @@ import Pairing from './Pairing';
 import GlassSurface from './GlassSurface';
 import GlassPicker from './GlassPicker';
 import LiquidSegments from './LiquidSegments';
+import SlidingContent from './SlidingContent';
 import Toggle from './LiquidToggle';
 import LiquidDisclosure from './LiquidDisclosure';
 import { usePresence } from './usePresence';
@@ -340,6 +341,7 @@ export default function App() {
                             onChange={next => change('mode', next)} items={[
                                 { value: 'tcp-client', label: 'TCP 客户端' }, { value: 'tcp-server', label: 'TCP 服务端' }, { value: 'udp', label: 'UDP' },
                             ]} />
+                        <SlidingContent value={settings.mode} order={['tcp-client', 'tcp-server', 'udp']} className="network-content">
                         <div className="form-stack">
                             {settings.mode !== 'tcp-server' && field('host', '设备 IPv4 地址')}
                             <div className={settings.mode !== 'tcp-client' ? 'form-grid' : ''}>
@@ -348,16 +350,17 @@ export default function App() {
                             </div>
                             {settings.mode === 'udp' && field('peer_port', 'UDP 对端端口')}
                         </div>
+                        </SlidingContent>
                         <div className="section-rule" /><div className="subheading"><Cable size={15} /><span>本地串口</span><button className="icon-button small" title="刷新串口" aria-label="刷新串口" onClick={refreshPorts}><RefreshCw size={14} /></button></div>
                         <div className="form-grid">{field('com', '业务 COM', { list: 'serial-ports' })}
                             {field('baud', '波特率 / bps', { list: 'baud-rates' })}
                         </div>
                         <LiquidDisclosure>
                             <div className="form-stack">
-                                {settings.mode === 'tcp-server' && field('host', '来源 IP 筛选（可选）', { hint: '留空允许任意来源连接' })}
+                                <SlidingContent value={settings.mode} order={['tcp-client', 'tcp-server', 'udp']}>{settings.mode === 'tcp-server' && field('host', '来源 IP 筛选（可选）', { hint: '留空允许任意来源连接' })}</SlidingContent>
                                 <div className="form-grid">{field('bytesize', '数据位', { options: ['5', '6', '7', '8'].map(v => [v, v]) })}{field('parity', '校验位', { options: ['N', 'E', 'O', 'M', 'S'].map(v => [v, v]) })}</div>
                                 <div className="form-grid">{field('stopbits', '停止位', { options: ['1', '1.5', '2'].map(v => [v, v]) })}{field('flow', '流控', { options: [['none', '无'], ['rtscts', 'RTS/CTS'], ['dsrdtr', 'DSR/DTR']] })}</div>
-                                {settings.mode === 'udp' && field('udp_payload', 'UDP 分包载荷 / B')}
+                                <SlidingContent value={settings.mode} order={['tcp-client', 'tcp-server', 'udp']}>{settings.mode === 'udp' && field('udp_payload', 'UDP 分包载荷 / B')}</SlidingContent>
                                 {([['timeout', 'COM 读超时 / s'], ['write_timeout', 'COM 写超时 / s'], ['reconnect', '重连间隔 / s'], ['connect_timeout', '连接超时 / s'], ['keepalive_idle', 'Keepalive 空闲 / s'], ['keepalive_interval', 'Keepalive 间隔 / s'], ['keepalive_count', 'Keepalive 次数'], ['bufsize', '单次读缓冲 / B'], ['stats_interval', '统计刷新间隔 / s']] as string[][]).map(([key, label]) => field(key, label))}
                                 {device === 'esp01s' && <>{field('control_port', '复位控制端口')}<Toggle checked={!!settings.no_reset_ui} onChange={value => change('no_reset_ui', value)}>关闭远程复位入口</Toggle></>}
                                 <Toggle checked={!!settings.verbose} onChange={value => change('verbose', value)}>调试日志</Toggle>
@@ -379,6 +382,7 @@ export default function App() {
                     <span>{connectionLabel}</span>
                 </div></div>
                 <section className="panel terminal-panel">
+                    <SlidingContent value={tab} order={['logs', 'traffic']} fill className="workspace-content">
                     {tab === 'logs' ? <>
                         <div className="log-toolbar"><label className="search-field"><Search size={14} /><input aria-label="搜索日志" placeholder="搜索日志…" value={search} onChange={e => setSearch(e.target.value)} /></label>
                             <div className="log-tools"><button className={`icon-button ${!autoscroll ? 'pressed' : ''}`} title={autoscroll ? '暂停自动滚动' : '恢复自动滚动'} aria-label={autoscroll ? '暂停自动滚动' : '恢复自动滚动'} onClick={() => setAutoscroll(!autoscroll)}>{autoscroll ? <Pause size={15} /> : <Play size={15} />}</button>
@@ -387,16 +391,19 @@ export default function App() {
                         </div>
                         <div className="log-sources"><LiquidSegments className="log-filter" label="日志来源" value={source} onChange={setSource}
                             items={[{ value: 'all', label: <>全部<span>{logs.length}</span></> }, { value: 'host', label: '上位机' }, { value: 'usb', label: 'ESP（USB）' }]} /><span className="log-retention">最近 3,000 行</span></div>
-                        <div className="log-body" ref={logBody} role="log" aria-label="运行日志" aria-live="off">
+                        <SlidingContent value={source} order={['all', 'host', 'usb']} fill className="log-content">
+                        <div className="log-body" data-slide-scroll="logs" ref={logBody} role="log" aria-label="运行日志" aria-live="off">
                             {visibleLogs.length ? logRows : <div className="empty-log"><span className="empty-symbol"><Terminal size={27} strokeWidth={1.3} /></span><h2>{search || source !== 'all' ? '没有匹配的日志' : '等待连接，准备就绪'}</h2><p>{search || source !== 'all' ? '试试其他关键词或切换日志来源。' : '启动桥接，或单独连接 USB。\n连接事件与设备日志将在这里显示。'}</p><span className="terminal-prompt"><i />READY WHEN YOU ARE</span></div>}
                         </div>
+                        </SlidingContent>
                         <div className="terminal-footer"><span><i className={`status-dot ${snap.connected ? 'online' : ''}`} />{autoscroll ? '自动滚动' : '已暂停滚动'}</span><span>UTF-8<span className="footer-dot">·</span>{visibleLogs.length} 行{snap.log_dropped > 0 && ` · 队列丢弃 ${snap.log_dropped}`}</span></div>
-                    </> : <div className="traffic-view"><div className="traffic-title"><div><h2>链路流量</h2><p>桥接实际字节统计 · 最近 30 秒</p></div><span className={`live-label ${trafficActive ? 'active' : snap.running ? 'paused' : ''}`}><i />{trafficActive ? 'LIVE' : snap.running ? 'PAUSED' : 'IDLE'}</span></div>
+                    </> : <div className="traffic-view" data-slide-scroll="traffic"><div className="traffic-title"><div><h2>链路流量</h2><p>桥接实际字节统计 · 最近 30 秒</p></div><span className={`live-label ${trafficActive ? 'active' : snap.running ? 'paused' : ''}`}><i />{trafficActive ? 'LIVE' : snap.running ? 'PAUSED' : 'IDLE'}</span></div>
                         <Chart samples={samples} index={0} label="网络接收" color="var(--chart-receive)" />
                         <Chart samples={samples} index={1} label="COM 写入" color="var(--chart-write)" />
                         <Chart samples={samples} index={2} label="网络发送" color="var(--chart-send)" />
                         {udpMode && <p className="traffic-note">UDP 桥接运行时更新曲线；已绑定不代表设备在线。</p>}
                     </div>}
+                    </SlidingContent>
                 </section>
                 <div className="runtime-line"><Network size={13} /><span>{snap.address}</span>{snap.running_settings && <span className="runtime-com">{snap.running_settings.com} / {snap.running_settings.baud}</span>}</div>
             </section>
@@ -412,8 +419,10 @@ export default function App() {
                     <div className="device-identity"><span className="chip-icon"><Radio size={24} strokeWidth={1.4} /></span><div><h2>{labels[device]}</h2><p>{device === 'c5' ? '双频 Wi-Fi · UART / SPI' : device === 's3' ? '2.4 GHz Wi-Fi · UART / SPI' : '2.4 GHz Wi-Fi · UART'}</p></div></div>
                     {caps ? <><LiquidSegments className="transport-switch" label="设备配置连接方式" value={settings.config_transport} disabled={waiting}
                         onChange={next => change('config_transport', next)} items={[{ value: 'usb', label: 'USB 配置' }, { value: 'http', label: 'Wi-Fi / HTTP' }]} />
+                        <SlidingContent value={settings.config_transport} order={['usb', 'http']} className="transport-content">
                         {settings.config_transport === 'http' && <div className="http-field">{field('config_url', '设备配置地址', { disabled: waiting })}</div>}
                         <div className="device-read-state"><span className={`status-dot ${snap.baseline ? 'online' : ''}`} />{snap.baseline ? `已读取 · 修订 ${snap.baseline.revision ?? '—'}` : '尚未读取设备配置'}</div>
+                        </SlidingContent>
                         <div className="device-facts"><div><span>业务接口</span><strong>{snap.baseline ? (linkOptions.find(([value]) => value === snap.baseline.link_mode)?.[1] ?? '接口已移除') : '—'}</strong></div><div><span>联网模式</span><strong>{snap.baseline ? ['自建热点 AP', '电脑热点 STA', '共享 Wi-Fi STA'][snap.baseline.mode] : '—'}</strong></div></div>
                         <button className="button secondary full" disabled={waiting} onClick={() => run(readConfig)}>{working ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}读取设备配置</button>
                         <button className="button full" onClick={() => setDrawer('config')}><SlidersHorizontal size={14} />打开配置面板<ArrowRight size={14} /></button>
@@ -449,6 +458,7 @@ export default function App() {
                     {snap.baseline && <p className={`config-edit-state ${configDirty ? 'dirty' : ''}`}>{configDirty ? '已修改，尚未保存到设备' : snap.baseline.unsaved || snap.baseline.migration_requires_setup ? '当前运行配置待明确保存并重启' : '与本次读取的配置一致'}</p>}
                     <LiquidSegments className="config-tabs" label="配置分页" value={configTab} onChange={setConfigTab}
                         items={[{ value: 'common', label: '接口与联网' }, { value: 'ap', label: '自建热点' }, { value: 'pc', label: '电脑热点' }, { value: 'shared', label: '共享 Wi-Fi' }]} />
+                    <SlidingContent value={configTab} order={['common', 'ap', 'pc', 'shared']} className="config-content">
                     {configTab === 'common' ? <div className="config-sections">
                         <div className="config-section"><h3>业务接口</h3><div className="form-grid">
                             {cf('link_mode', 'MCU 接口', { numeric: true, options: linkOptions })}
@@ -477,6 +487,7 @@ export default function App() {
                         <Toggle disabled={waiting} checked={!!config[configTab]?.static_ip} onChange={value => editConfig('static_ip', value, configTab)}>使用静态 IP（关闭时使用 DHCP）</Toggle>
                         <div className="form-grid">{[['ip', 'IP 地址'], ['gateway', '网关'], ['netmask', '子网掩码'], ['dns', 'DNS']].map(([key, label]) => cf(key, label, { disabled: waiting || !config[configTab]?.static_ip }, configTab))}</div>
                     </div>}
+                    </SlidingContent>
                     <div className="backup-actions"><button className="text-button" disabled={waiting} onClick={() => run(async () => { const data = await call('backup_config', config); download(`${device}-config-backup.json`, JSON.stringify(data, null, 2), 'application/json'); })}><Download size={14} />备份配置</button><button className="text-button" disabled={waiting} onClick={() => importInput.current?.click()}><FileJson size={14} />导入备份</button><small>备份与草稿均不含密码</small></div>
                     <input type="file" hidden ref={importInput} accept=".json,application/json" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) run(async () => { if (file.size > 131072) throw new Error('备份文件过大'); const next = await call('import_config', await file.text()); setConfig(next); cacheDraft(next); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await pendingDraft.current; notify('已导入编辑区；尚未写入设备'); }); }} />
                 </>}

@@ -66,6 +66,8 @@
     box-shadow: none;
 }
 .liquid-segments > button.selected { font-weight: 650; }
+/* The lens carries selected focus. A second button outline is refracted into a ghost rim on touch Edge. */
+.liquid-segments > button.selected:focus-visible { outline: none; }
 .liquid-segments > button:hover:not(:disabled):not(.selected) { color: var(--accent-ink); background: transparent; }
 .liquid-segments > button:active:not(:disabled) { scale: none; }
 .liquid-segments:has(> button:focus-visible) .liquid-indicator { border-color: var(--accent); }

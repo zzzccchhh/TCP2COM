@@ -81,6 +81,9 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
     function update() {
         frame = 0;
         if (disposed) return;
+        // Content heights may tween, while the large background keeps its existing map.
+        // The final geometry is sampled once after the local slide has finished.
+        if (!control && element.querySelector('[data-sliding]')) return;
         // Small moving controls retain refraction on touch screens; large panels use the lighter fallback.
         // Touch menu highlights are static glass; avoid allocating global SVG resources for each popup.
         if (!context || (!control && (compact.matches || !fine.matches))
@@ -171,6 +174,7 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
     }
 
     function schedule() {
+        if (!control && element.querySelector('[data-sliding]')) return;
         if (!disposed && !frame) frame = requestAnimationFrame(update);
     }
     function transitionEnd(event: TransitionEvent) {
@@ -205,6 +209,7 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
     element.addEventListener('pointermove', move);
     element.addEventListener('pointerleave', leave);
     element.addEventListener('transitionend', transitionEnd);
+    element.addEventListener('content-slide-end', schedule);
     // Hidden WebView2 windows suspend animation frames. Initialize once even before showing.
     update();
 
@@ -219,6 +224,7 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
         element.removeEventListener('pointermove', move);
         element.removeEventListener('pointerleave', leave);
         element.removeEventListener('transitionend', transitionEnd);
+        element.removeEventListener('content-slide-end', schedule);
         reset();
         delete element.dataset.glass;
     };
