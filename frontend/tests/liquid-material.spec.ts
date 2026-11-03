@@ -156,17 +156,23 @@ test('touch switches follow the finger and vertical scrolling cancels the gestur
     } finally { await context.close(); }
 });
 
-test('menus grow from their trigger and confirmation focus waits for the visible state', async ({ page }) => {
+test('menus animate one glass sheet and confirmation focus waits for the visible state', async ({ page }) => {
     await ready(page);
     const device = page.getByLabel('当前设备', { exact: true });
     await device.click();
     const popup = page.locator('.picker-position');
+    await expect(popup).toHaveAttribute('data-state', 'open');
     const frames = await popup.evaluate(async element => {
-        const widths: number[] = [];
-        for (let i = 0; i < 5; i++) { await new Promise(requestAnimationFrame); widths.push(element.getBoundingClientRect().width); }
-        return widths;
+        const frames: { width: number; sheet: number }[] = [];
+        for (let i = 0; i < 5; i++) {
+            await new Promise(requestAnimationFrame);
+            frames.push({ width: element.getBoundingClientRect().width,
+                sheet: new DOMMatrixReadOnly(getComputedStyle(element.querySelector('.picker-window')!, '::before').transform).d });
+        }
+        return frames;
     });
-    expect(Math.max(...frames) - Math.min(...frames)).toBeGreaterThan(2);
+    expect(Math.max(...frames.map(frame => frame.width)) - Math.min(...frames.map(frame => frame.width))).toBeLessThan(.01);
+    expect(frames.at(-1)!.sheet).toBeGreaterThan(frames[0].sheet);
     await popup.evaluate(element => Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished)));
     await page.keyboard.press('Escape');
     await device.click();
@@ -188,6 +194,90 @@ test('menus grow from their trigger and confirmation focus waits for the visible
     await page.keyboard.press('Escape');
     await expect(confirmation).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).__calls.some((c: any[]) => c[0] === 'save_device'))).toBe(false);
+});
+
+test('first open waits for the final-size optics and has no geometry or bitmap switch while visible', async ({ page }) => {
+    await page.addInitScript(() => {
+        const decode = HTMLImageElement.prototype.decode;
+        (window as any).__glassDecodes = [];
+        HTMLImageElement.prototype.decode = function () {
+            if (!this.src.startsWith('data:image/png')) return decode.call(this);
+            return new Promise<void>((resolve, reject) => {
+                (window as any).__glassDecodes.push(() => decode.call(this).then(resolve, reject));
+            });
+        };
+    });
+    await ready(page);
+    await page.getByRole('button', { name: '选择业务 COM', exact: true }).click();
+    const popup = page.locator('.picker-position');
+    await expect.poll(() => page.evaluate(() => (window as any).__glassDecodes.length)).toBeGreaterThan(0);
+    await expect(popup).toHaveAttribute('data-state', 'closed');
+    await expect(popup).toHaveCSS('visibility', 'hidden');
+    expect(await popup.evaluate(element => element.getAnimations({ subtree: true }).length)).toBe(0);
+    await page.evaluate(() => (window as any).__glassDecodes.forEach((release: () => void) => release()));
+    await expect(popup).toHaveAttribute('data-state', 'open');
+    const frames = await popup.evaluate(async element => {
+        const glass = element.querySelector<HTMLElement>('.picker-window')!;
+        const id = glass.style.getPropertyValue('--glass-refraction').match(/#([^"\)]+)/)?.[1];
+        const image = id ? document.getElementById(id)?.querySelector('feImage') : null;
+        const initialMap = image?.getAttribute('href');
+        const start = performance.now();
+        const frames: { width: number; height: number; text: number; bitmapStable: boolean; ready: boolean }[] = [];
+        while (performance.now() - start < 450) {
+            await new Promise(requestAnimationFrame);
+            const rect = element.getBoundingClientRect();
+            frames.push({ width: rect.width, height: rect.height,
+                text: element.querySelector('.picker-list button')!.getBoundingClientRect().height,
+                bitmapStable: initialMap === image?.getAttribute('href'), ready: element.getAttribute('data-ready') === 'true' });
+        }
+        return frames;
+    });
+    expect(frames.every(frame => frame.ready && frame.bitmapStable)).toBe(true);
+    for (const key of ['width', 'height', 'text'] as const) {
+        expect(Math.max(...frames.map(frame => frame[key])) - Math.min(...frames.map(frame => frame[key]))).toBeLessThan(.01);
+    }
+    await page.screenshot({ path: 'test-results/picker-open-stable.png' });
+});
+
+test('quick reversals continue the current glass and text progress without an opacity restart', async ({ page }) => {
+    await ready(page);
+    await page.getByRole('button', { name: '选择业务 COM', exact: true }).click();
+    const popup = page.locator('.picker-position');
+    await expect(popup).toHaveAttribute('data-state', 'open');
+    await popup.evaluate(element => Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished)));
+    const result = await page.evaluate(async () => {
+        const menu = document.querySelector('.picker-position')!;
+        const glass = menu.querySelector('.picker-window')!, text = menu.querySelector('.picker-content')!;
+        const entering = { duration: getComputedStyle(glass, '::before').transitionDuration,
+            curve: getComputedStyle(glass, '::before').transitionTimingFunction };
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        const until = performance.now() + 60;
+        while (performance.now() < until) await new Promise(requestAnimationFrame);
+        const before = parseFloat(getComputedStyle(text).opacity);
+        const exiting = { duration: getComputedStyle(glass, '::before').transitionDuration,
+            curve: getComputedStyle(glass, '::before').transitionTimingFunction };
+        document.querySelector<HTMLButtonElement>('button[aria-label="选择业务 COM"]')!.click();
+        const frames: { opacity: number; sheet: number; delay: string }[] = [];
+        for (let i = 0; i < 10; i++) {
+            await new Promise(requestAnimationFrame);
+            frames.push({ opacity: parseFloat(getComputedStyle(text).opacity),
+                sheet: new DOMMatrixReadOnly(getComputedStyle(glass, '::before').transform).d,
+                delay: getComputedStyle(text).transitionDelay });
+        }
+        return { before, entering, exiting, frames };
+    });
+    expect(result.entering).toEqual(result.exiting);
+    expect(result.before).toBeGreaterThan(.05);
+    expect(Math.min(...result.frames.map(frame => frame.opacity))).toBeGreaterThanOrEqual(result.before - .03);
+    expect(result.frames[2].opacity).toBeGreaterThan(result.before);
+    expect(result.frames.every(frame => frame.delay.split(',').every(delay => parseFloat(delay) === 0))).toBe(true);
+    for (let i = 1; i < result.frames.length; i++) {
+        expect(result.frames[i].opacity).toBeGreaterThanOrEqual(result.frames[i - 1].opacity - .001);
+        expect(result.frames[i].sheet).toBeGreaterThanOrEqual(result.frames[i - 1].sheet - .001);
+    }
+    await expect(popup).toHaveAttribute('data-state', 'open');
+    await page.keyboard.press('Escape');
+    await expect(popup).toHaveCount(0);
 });
 
 test('disclosure animates both directions, reverses, and keeps collapsed fields inert', async ({ page }) => {

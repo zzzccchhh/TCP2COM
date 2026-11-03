@@ -18,8 +18,10 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
     const wrap = useRef<HTMLSpanElement>(null);
     const optionNodes = useRef<(HTMLButtonElement | null)[]>([]);
     const [open, setOpen] = useState(false);
-    const presence = usePresence(open ? true : null);
-    const [arrived, setArrived] = useState(false);
+    const [positioned, setPositioned] = useState(false);
+    const [opticsReady, setOpticsReady] = useState(false);
+    const prepared = positioned && opticsReady;
+    const presence = usePresence(open ? true : null, 380, prepared);
     const [active, setActive] = useState(0);
     const [query, setQuery] = useState('');
     const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
@@ -49,11 +51,9 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
         trigger.current?.focus({ preventScroll: true });
     }
     useLayoutEffect(() => { if (open && (disabled || trigger.current?.matches(':disabled'))) close(); });
-    // Retained menus reopen in place instead of replaying the initial trigger transform.
     useLayoutEffect(() => {
-        if (presence.entered) setArrived(true);
-        else if (!presence.present) setArrived(false);
-    }, [presence.entered, presence.present]);
+        if (!presence.present) { setPositioned(false); setOpticsReady(false); }
+    }, [presence.present]);
     useLayoutEffect(() => {
         if (!presence.present) return;
         function place() {
@@ -73,11 +73,11 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             const left = Math.max(leftEdge + 12, Math.min(rect.left, leftEdge + viewportWidth - width - 12));
             const height = Math.min(popup.current?.offsetHeight || maxHeight, maxHeight);
             const top = upwards ? rect.top - height - 7 : rect.bottom + 7;
-            setPosition({ left, top, width, maxHeight,
-                '--picker-dx': `${rect.left - left}px`, '--picker-dy': `${rect.top - top}px`,
-                '--picker-sx': rect.width / width, '--picker-sy': Math.min(1, rect.height / Math.max(1, height)),
-                '--picker-edge': upwards ? '100%' : '0%',
+            setPosition({ left, top, width, maxHeight, '--picker-edge': upwards ? '100%' : '0%',
+                '--picker-clip-top': upwards ? '100%' : '0%', '--picker-clip-bottom': upwards ? '0%' : '100%',
             } as CSSProperties);
+            // The first measurement can precede the constrained width. Prepare optics only after layout settles.
+            if (Math.abs((popup.current?.offsetWidth ?? 0) - width) <= 1) setPositioned(true);
         }
         function outside(event: Event) {
             const target = event.target as Node;
@@ -159,21 +159,23 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             onPointerDown={event => event.preventDefault()} onClick={() => { if (open) close(); else reveal(); }}><ChevronDown size={13} /></button>
             : <ChevronDown size={13} />}
         {presence.present && createPortal(<div ref={element => { popup.current = element; }} className="picker-position"
-            style={position} data-state={presence.entered ? 'open' : 'closed'} data-closing={!open || undefined}
-            data-arrived={arrived || undefined}
+            style={position} data-state={presence.entered ? 'open' : 'closed'} data-ready={prepared || undefined}
             aria-hidden={!open || undefined} inert={!open}>
-            <GlassSurface className="picker-window" aria-label={`${label}选项`}>
-                <div className="picker-heading">{label}</div>
-                <div className="picker-list" role="listbox" id={id} aria-label={`${label}选项`}>
-                    {shown.length > 0 && <GlassSurface as="div" className="liquid-indicator picker-highlight" aria-hidden="true"
-                        style={{ '--liquid-y': `${highlight.top}px`, height: highlight.height } as CSSProperties} />}
-                    {shown.map(([key, text], index) => <button type="button" role="option" tabIndex={-1} id={`${id}-${index}`} key={key}
-                        ref={element => { optionNodes.current[index] = element; }} aria-selected={String(key) === String(value)}
-                        className={index === active ? 'is-active' : ''}
-                        onPointerDown={event => { event.preventDefault(); if (event.button === 0) setActive(index); }} onClick={() => choose(index)}>
-                        <span>{text}</span>{String(key) === String(value) && <Check size={14} />}
-                    </button>)}
-                    {!shown.length && <p className="picker-empty">没有匹配的选项，可直接输入。</p>}
+            <GlassSurface className="picker-window" aria-label={`${label}选项`} opticsEnabled={positioned}
+                onGlassReady={() => setOpticsReady(true)}>
+                <div className="picker-content">
+                    <div className="picker-heading">{label}</div>
+                    <div className="picker-list" role="listbox" id={id} aria-label={`${label}选项`}>
+                        {shown.length > 0 && <GlassSurface as="div" className="liquid-indicator picker-highlight" aria-hidden="true"
+                            style={{ '--liquid-y': `${highlight.top}px`, height: highlight.height } as CSSProperties} />}
+                        {shown.map(([key, text], index) => <button type="button" role="option" tabIndex={-1} id={`${id}-${index}`} key={key}
+                            ref={element => { optionNodes.current[index] = element; }} aria-selected={String(key) === String(value)}
+                            className={index === active ? 'is-active' : ''}
+                            onPointerDown={event => { event.preventDefault(); if (event.button === 0) setActive(index); }} onClick={() => choose(index)}>
+                            <span>{text}</span>{String(key) === String(value) && <Check size={14} />}
+                        </button>)}
+                        {!shown.length && <p className="picker-empty">没有匹配的选项，可直接输入。</p>}
+                    </div>
                 </div>
             </GlassSurface>
         </div>, document.body)}

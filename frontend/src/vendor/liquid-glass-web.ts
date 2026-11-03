@@ -21,7 +21,7 @@ function roundedRectSDF(x: number, y: number, width: number, height: number, rad
 }
 
 /** Attach upstream's SDF -> canvas -> SVG displacement pipeline to an existing surface. */
-export function attachLiquidGlass(element: HTMLElement): () => void {
+export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): () => void {
     const fine = matchMedia('(hover: hover) and (pointer: fine)');
     const compact = matchMedia('(max-width: 760px)');
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -59,12 +59,14 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
     const context = supported ? canvas.getContext('2d') : null;
     let frame = 0;
     let disposed = false;
+    let revision = 0;
     let lastSize = '';
     let pointerFrame = 0;
     let pointerX = '50%';
     let pointerY = '0%';
 
     function reset() {
+        revision++;
         svg.remove();
         element.style.removeProperty('--glass-refraction');
         element.dataset.glass = 'frosted';
@@ -75,7 +77,7 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
         frame = 0;
         if (disposed) return;
         // Small moving controls retain refraction on touch screens; large panels use the lighter fallback.
-        if (!context || (!control && (compact.matches || !fine.matches))) { reset(); return; }
+        if (!context || (!control && (compact.matches || !fine.matches))) { reset(); onReady?.(); return; }
         const width = element.offsetWidth;
         const height = element.offsetHeight;
         if (width < 2 || height < 2) { reset(); return; }
@@ -125,15 +127,28 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
                 node.setAttribute('width', String(width));
                 node.setAttribute('height', String(height));
             }
-            image.setAttribute('href', canvas.toDataURL());
+            const map = canvas.toDataURL();
+            image.setAttribute('href', map);
             displacement.setAttribute('scale', String(extent * 2));
             if (!svg.isConnected) document.body.append(svg);
             element.style.setProperty('--glass-refraction', `url("#${id}") blur(${control ? .15 : 12}px) saturate(1.35)`);
             element.dataset.glass = 'refractive';
             lastSize = key;
+            if (onReady) {
+                // Menus stay hidden until their final-size bitmap is decoded, including on first open.
+                const current = ++revision;
+                const bitmap = new Image();
+                bitmap.src = map;
+                bitmap.decode().then(() => {
+                    if (!disposed && current === revision) onReady();
+                }).catch(() => {
+                    if (!disposed && current === revision) { reset(); onReady(); }
+                });
+            }
         } catch {
             // Canvas restrictions or unavailable resources must never prevent using the workspace.
             reset();
+            onReady?.();
         }
     }
 
