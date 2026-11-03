@@ -41,6 +41,8 @@ cd ..
 
 Windows 桌面界面需要 Microsoft Edge WebView2 Runtime。
 
+新版工作台采用浅色液态玻璃界面：桌面 Chromium / WebView2 使用背景折射，手机、窄屏及其他浏览器使用毛玻璃回退。日志文字和表单内容保持清晰，系统的“减少动态效果”设置会关闭按压缩放与跟随光效。效果代码基于 [Liquid Glass Web](https://github.com/xiaofangstudio/liquid-glass-web)，固定版本随前端打包，无需 CDN 或在线背景图；来源与适配说明见 [vendor/README.md](frontend/src/vendor/README.md)，发布包包含 `third-party-licenses.txt`。
+
 | 入口 | 用途 |
 |---|---|
 | `启动_新版界面.vbs` | 本机 React 桌面工作台，不显示控制台 |
@@ -232,6 +234,8 @@ py -3 -B tools/test-firmware-config.py --device c5 --fixture D:/ESP/ESP-C5-WFI/b
 Windows 浏览器测试使用 Edge；其他平台需要 Playwright Chromium。`tools/test-webview.py` 可另外验证本地 WebView2 集成，默认使用隐藏测试窗口、临时设置和本机模拟连接。
 
 软件验证记录（2026-11-02）：Python 245 项，238 项通过、7 项按环境跳过；前端生产构建和 26 项浏览器回归通过；上位机与 C5 生产 C 配置夹具配对通过，包含接口 0/3/4、网络角色和保存应答丢失不重放。
+
+液态玻璃界面验证（2026-11-03）：生产构建通过；Python 245 项全部通过；浏览器 29 项全部通过，包含折射渲染对比、尺寸变化、弹层实例清理、毛玻璃回退及减少动态效果。隐藏 WebView2 窗口的玻璃初始化、JS/Python 接口、TCP/串口回环和退出清理通过；真实 ESP/USB 与实体手机效果未在本轮验收。
 
 测试覆盖旧 SPI 备份的 8081 端口与未生效复位选择，S3 仅 2.4 GHz 和原接口回归。主机替身、回环和浏览器检查不代表真实 ESP/USB、MCU 停发、SPI 时序、手机网络或持续无线吞吐已验收。本轮没有烧录或改动车端工程。
 

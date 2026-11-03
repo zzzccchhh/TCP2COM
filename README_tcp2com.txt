@@ -12,6 +12,8 @@ tcp2com 使用速查
    新版桌面：py -3 -m pip install -r requirements-web.txt
    局域网服务：py -3 -m pip install -r requirements-lan.txt
 2. 新版前端首次构建：进入 frontend，执行 npm ci、npm run build。
+   工作台采用浅色液态玻璃风格，桌面 Chromium/WebView2 支持背景折射；手机、窄屏及其他浏览器回退为毛玻璃。
+   效果随前端本地打包，不依赖 CDN 或在线背景图；支持系统“减少动态效果”。授权说明见 third-party-licenses.txt。
 3. 本机工作台：启动_新版界面.vbs；启动_新版界面.bat 用于构建和诊断。
 4. 手机/其他电脑：启动_局域网服务.vbs，使用管理窗口生成的完整链接或二维码。
 5. Tkinter：启动_图形界面.bat；原 CLI 使用各启动 BAT 或 tcp2com.py。
@@ -77,5 +79,6 @@ C5 仅 UART 模式可启用复位输出，默认关闭；SPI=4 不启用。ESP-0
 控制服务用于可信网络，不代替硬件急停。USB 日志、队列和丢弃计数用于判断瓶颈，网络接收不等于 COM 写入成功。
 
 2026-11-02 软件验证：Python245项，238通过、7按环境跳过；前端构建、26项浏览器回归、C5生产C配置夹具配对通过。
+2026-11-03 液态玻璃界面验证：生产构建、Python245项、浏览器29项全部通过；隐藏WebView2玻璃初始化、JS/Python接口、TCP/串口回环及退出清理通过。真实ESP/USB与实体手机效果未在本轮验收。
 真实 ESP/USB、SPI/DMA时序、手机网络和持续无线吞吐仍需板端验证，本轮未烧录或改动车端。
 GitHub main 推送触发 Pages 工作流；线上只发布前端，服务电脑仍需更新 Python 和本地前端构建并重启服务。

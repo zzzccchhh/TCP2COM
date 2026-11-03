@@ -9,6 +9,7 @@ import {
 import { applyDraft, call, defaults, deviceDefaults, download, emptySnapshot, isTrafficActive, labels, size } from './api';
 import type { Data } from './api';
 import Pairing from './Pairing';
+import GlassSurface from './GlassSurface';
 import { getLANStatus, isLAN } from './lan';
 
 type FieldProps = {
@@ -308,7 +309,7 @@ export default function App() {
 
         <main className="workspace">
             <aside className="connection-column">
-                <section className="panel connection-panel"><div className="panel-title"><span><Network size={17} />连接设置</span><span className="section-number">01</span></div>
+                <GlassSurface className="panel connection-panel"><div className="panel-title"><span><Network size={17} />连接设置</span><span className="section-number">01</span></div>
                     <fieldset disabled={waiting}>
                         <div className="segmented mode-switch" aria-label="电脑网络角色">
                             {[['tcp-client', 'TCP 客户端'], ['tcp-server', 'TCP 服务端'], ['udp', 'UDP']].map(([value, label]) => <button key={value} aria-pressed={settings.mode === value} className={settings.mode === value ? 'selected' : ''} onClick={() => change('mode', value)}>{label}</button>)}
@@ -342,7 +343,7 @@ export default function App() {
                             : <div className="form-grid"><button className="button primary" disabled={waiting} onClick={() => run(() => call('bridge', 'restart'))}><RefreshCw size={14} />应用并重启</button><button className="button" disabled={waiting} title="停止业务桥接并关闭 USB" onClick={() => run(() => call('bridge', 'stop'))}><Square size={12} />停止</button></div>}
                         <p className="connection-note"><ShieldCheck size={12} />{snap.running ? snap.applied ? '当前参数已应用' : '参数有修改，应用并重启后生效' : '手动启动连接 · 不创建虚拟串口'}</p>
                     </div>
-                </section>
+                </GlassSurface>
             </aside>
 
             <section className="center-column">
@@ -376,13 +377,13 @@ export default function App() {
             </section>
 
             <aside className="device-column">
-                <section className="panel usb-panel"><div className="panel-title"><span><Usb size={17} />USB 连接</span><Badge active={usbOnline} warning={usbActive && !usbOnline}>{snap.usb?.closing ? '关闭中' : usbOnline ? '已连接' : usbActive ? '重试中' : '未连接'}</Badge></div>
+                <GlassSurface className="panel usb-panel"><div className="panel-title"><span><Usb size={17} />USB 连接</span><Badge active={usbOnline} warning={usbActive && !usbOnline}>{snap.usb?.closing ? '关闭中' : usbOnline ? '已连接' : usbActive ? '重试中' : '未连接'}</Badge></div>
                     {caps ? <><div className="form-stack">{field('usb_port', '原生 USB COM', { list: 'serial-ports', disabled: waiting })}</div>
                         <button className={`button full ${usbActive ? '' : 'secondary'}`} disabled={working || snap.busy || (snap.config_busy && !usbActive)} onClick={() => run(() => call('usb', !usbActive))}>{usbActive ? <Unplug size={15} /> : <Usb size={15} />}{usbActive ? '断开 USB' : '连接 USB'}</button>
                         <div className="usb-caption"><span>独立于业务桥接</span><button className="text-button" onClick={() => setDrawer('diagnostics')}>诊断<ArrowUpRight size={12} /></button></div></> : <p className="muted small-copy">ESP-01S 使用业务串口和网络连接。</p>}
-                </section>
+                </GlassSurface>
 
-                <section className="panel device-panel"><div className="panel-title"><span><Settings2 size={17} />设备配置</span><span className="section-number">02</span></div>
+                <GlassSurface className="panel device-panel"><div className="panel-title"><span><Settings2 size={17} />设备配置</span><span className="section-number">02</span></div>
                     <div className="device-identity"><span className="chip-icon"><Radio size={24} strokeWidth={1.4} /></span><div><h2>{labels[device]}</h2><p>{device === 'c5' ? '双频 Wi-Fi · UART / SPI' : device === 's3' ? '2.4 GHz Wi-Fi · UART / SPI' : '2.4 GHz Wi-Fi · UART'}</p></div></div>
                     {caps ? <><div className="segmented transport-switch">{[['usb', 'USB 配置'], ['http', 'Wi-Fi / HTTP']].map(([value, label]) => <button key={value} disabled={waiting} className={settings.config_transport === value ? 'selected' : ''} onClick={() => change('config_transport', value)}>{label}</button>)}</div>
                         {settings.config_transport === 'http' && <div className="http-field">{field('config_url', '设备配置地址', { disabled: waiting })}</div>}
@@ -392,23 +393,23 @@ export default function App() {
                         <button className="button full" onClick={() => setDrawer('config')}><SlidersHorizontal size={14} />打开配置面板<ArrowRight size={14} /></button>
                         <p className="setup-note"><Info size={12} /><span>配网：{device === 'c5' ? 'Key' : 'GPIO4'} 长按 3 秒进入配网。</span></p>
                     </> : <p className="setup-note">ESP-01S 保留透传和远程复位功能。</p>}
-                </section>
+                </GlassSurface>
 
-                <section className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><button className="icon-button" title="打开远程复位" aria-label="打开远程复位" onClick={() => { setResetHost(settings.host || ''); setDrawer('reset'); }}><ArrowUpRight size={18} /></button></section>
+                <GlassSurface className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><button className="icon-button" title="打开远程复位" aria-label="打开远程复位" onClick={() => { setResetHost(settings.host || ''); setDrawer('reset'); }}><ArrowUpRight size={18} /></button></GlassSurface>
             </aside>
         </main>
 
-        <section className="metrics-strip" aria-label="桥接统计">
+        <GlassSurface className="metrics-strip" aria-label="桥接统计">
             {rates.map((rate, index) => <div className="metric" key={index}><span className="metric-label">{index === 0 ? <ArrowDownLeft size={14} /> : index === 1 ? <Cable size={14} /> : <ArrowUpRight size={14} />}{['网络接收', 'COM 写入', '网络发送'][index]}</span><strong>{size(rate, true)}</strong><small>{['来自 Wi-Fi 链路', '交付本地串口', '发往 Wi-Fi 链路'][index]}</small></div>)}
             <div className="metric"><span className="metric-label"><History size={14} />待写队列</span><strong>{size(snap.queued)}</strong><small>峰值 {size(snap.peak)}</small></div>
             <div className={`metric ${dropped ? 'has-warning' : ''}`}><span className="metric-label"><Activity size={14} />累计丢弃</span><strong>{size(dropped)}</strong><button className="text-button" onClick={() => setDrawer('diagnostics')}>查看链路诊断<ArrowUpRight size={11} /></button></div>
-        </section>
+        </GlassSurface>
         <footer className="page-footer"><span><Check size={12} />{native ? snap.state_status : '本地工具 · 数据留在你的电脑'}</span><span>ESP-01S / ESP32-C5 / ESP32-S3</span></footer>
 
         <datalist id="serial-ports">{ports.map(port => <option key={port.device} value={port.device}>{port.description}</option>)}</datalist>
         <datalist id="baud-rates">{[9600, 115200, 460800, 921600, 1152000, 2000000, 3000000].map(value => <option key={value} value={value} />)}</datalist>
 
-        {drawer && <div className="drawer-backdrop" onClick={() => { if (!confirm) setDrawer(null); }}><section className={`drawer ${drawer === 'config' ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={{ config: '设备配置面板', diagnostics: '链路诊断', reset: '远程复位', help: '使用帮助' }[drawer]} onClick={e => e.stopPropagation()}>
+        {drawer && <div className="drawer-backdrop" onClick={() => { if (!confirm) setDrawer(null); }}><GlassSurface className={`drawer ${drawer === 'config' ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={{ config: '设备配置面板', diagnostics: '链路诊断', reset: '远程复位', help: '使用帮助' }[drawer]} onClick={e => e.stopPropagation()}>
             <div className="drawer-heading"><div><div className="eyebrow">{drawer === 'config' ? 'DEVICE CONFIGURATION' : drawer === 'diagnostics' ? 'LINK DIAGNOSTICS' : drawer === 'reset' ? 'REMOTE RESET' : 'QUICK START'}</div><h2>{{ config: `${labels[device]} 设备配置`, diagnostics: '链路诊断', reset: '远程复位', help: '开始使用工作台' }[drawer]}</h2></div><button className="icon-button" aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20} /></button></div>
             <div className="drawer-body">
                 {drawer === 'config' && <>
@@ -467,9 +468,9 @@ export default function App() {
                 {drawer === 'help' && <><div className="help-step"><span>01</span><div><h3>选择设备与连接角色</h3><p>TCP 客户端主动连接设备；TCP 服务端等待设备连接；UDP 使用固定对端。</p></div></div><div className="help-step"><span>02</span><div><h3>设置业务 COM，启动桥接</h3><p>程序打开已有串口。需要虚拟串口时，请先创建串口对。电脑本地波特率不会修改设备 UART。</p></div></div><div className="help-step"><span>03</span><div><h3>按需连接 USB</h3><p>C5/S3 的 USB 用于日志和配置，可独立运行。使用 ESP-IDF monitor 前先断开 USB，等待释放端口。</p></div></div><div className="help-step"><span>04</span><div><h3>读取、编辑、明确保存</h3><p>进入配网后读取当前设备，再编辑并保存。保存会写入 NVS 并重启；保存结果不明时先重新读取核对。</p></div></div><div className="notice"><Info size={16} /><span>关闭主窗口会停止桥接并释放串口。最小化窗口继续转发。停止按钮同时关闭业务桥接与 USB。</span></div></>}
             </div>
             {drawer === 'config' && <div className="drawer-footer"><span><ShieldCheck size={14} />明确保存后写入设备 NVS</span><button className="button primary" disabled={waiting || !snap.baseline || (device === 'c5' && config.link_mode === -1)} onClick={() => run(async () => { const preview = await call<Data>('preview_save', config, passwords, clear); if (!preview.needed) notify('没有修改，无需保存'); else setConfirm({ ...preview, config: structuredClone(config), passwords: { ...passwords }, clear: [...clear] }); })}><Check size={15} />保存并重启</button></div>}
-        </section></div>}
+        </GlassSurface></div>}
 
-        {confirm && <div className="modal-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-label="确认保存设备配置"><div className="confirm-icon"><Settings2 size={22} /></div><h2>保存配置并重启？</h2><p>以下修改将写入 {labels[device]} 的 NVS。<br />设备重启期间业务连接会中断。</p><div className="change-list">{confirm.changes.length ? confirm.changes.map((item: Data) => <div key={item.field}><span>{item.field}</span><strong>{item.value}</strong></div>) : <p>明确保存当前运行配置</p>}</div><div className="dialog-actions"><button className="button" disabled={working} onClick={() => setConfirm(null)}>取消</button><button className="button primary" disabled={working} onClick={() => run(async () => { const pending = confirm; setConfirm(null); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await call('save_device', pending.config, pending.passwords, pending.clear, pending.epoch); notify('设备已确认保存并请求重启，请重新读取核对'); })}>{working && <LoaderCircle size={14} className="spin" />}确认保存并重启</button></div></section></div>}
+        {confirm && <div className="modal-backdrop"><GlassSurface className="confirm-dialog" role="dialog" aria-modal="true" aria-label="确认保存设备配置"><div className="confirm-icon"><Settings2 size={22} /></div><h2>保存配置并重启？</h2><p>以下修改将写入 {labels[device]} 的 NVS。<br />设备重启期间业务连接会中断。</p><div className="change-list">{confirm.changes.length ? confirm.changes.map((item: Data) => <div key={item.field}><span>{item.field}</span><strong>{item.value}</strong></div>) : <p>明确保存当前运行配置</p>}</div><div className="dialog-actions"><button className="button" disabled={working} onClick={() => setConfirm(null)}>取消</button><button className="button primary" disabled={working} onClick={() => run(async () => { const pending = confirm; setConfirm(null); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await call('save_device', pending.config, pending.passwords, pending.clear, pending.epoch); notify('设备已确认保存并请求重启，请重新读取核对'); })}>{working && <LoaderCircle size={14} className="spin" />}确认保存并重启</button></div></GlassSurface></div>}
         {toast && <div className="toast" role="status"><Info size={16} /><span>{toast}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setToast('')}><X size={14} /></button></div>}
     </div>;
 }

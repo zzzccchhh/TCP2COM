@@ -56,6 +56,21 @@ def main():
                 time.sleep(.1)
             else:
                 raise AssertionError("React did not connect to the native API")
+            optics = window.evaluate_js("""(() => {
+                const card = document.querySelector('.connection-panel');
+                return {mode: card?.dataset.glass,
+                    expected: /Chrome|Chromium|Edg\\//.test(navigator.userAgent)
+                        && CSS.supports('backdrop-filter', 'url(#probe)')
+                        && matchMedia('(hover: hover) and (pointer: fine)').matches
+                        && !matchMedia('(max-width: 760px)').matches ? 'refractive' : 'frosted',
+                    filters: document.querySelectorAll('svg.liquid-glass-defs').length,
+                    overflow: document.documentElement.scrollWidth > innerWidth};
+            })()""")
+            if optics.get("mode") != optics["expected"] or optics["overflow"]:
+                raise AssertionError(f"Native liquid glass did not initialize: {optics}")
+            if optics["filters"] != (5 if optics["expected"] == "refractive" else 0):
+                raise AssertionError(f"Unexpected native optical resources: {optics}")
+            print(f"PASS: WebView2 liquid glass ({optics['mode']}, {optics['filters']} filters)")
             if os.name == "nt":
                 from ctypes import wintypes
                 user = ctypes.WinDLL("user32", use_last_error=True)
