@@ -27,7 +27,7 @@ test('resizing and reopening panels release optical resources and preserve input
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto('/');
-    const defs = page.locator('svg.liquid-glass-defs');
+    const defs = page.locator('svg.liquid-glass-defs[data-glass-kind="surface"]');
     await expect(defs).toHaveCount(5);
     await expect(page.getByText('浏览器界面预览', { exact: false })).toBeVisible();
     await page.screenshot({ path: 'test-results/glass-desktop.png', fullPage: true });

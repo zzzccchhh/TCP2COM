@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { call } from './api';
 import GlassSurface from './GlassSurface';
+import { usePresence } from './usePresence';
 import { autoConnect, defaultTerminalName, disconnect, getLANStatus, isLAN, normalizeAddress, retryConnection, serviceAddress } from './lan';
 
 export default function Pairing() {
     const [open, setOpen] = useState(false);
+    const panelMotion = usePresence(open ? true : null);
     const [address, setAddress] = useState(serviceAddress);
     const [name, setName] = useState(defaultTerminalName);
     const [status, setStatus] = useState(getLANStatus);
@@ -34,7 +36,8 @@ export default function Pairing() {
     return <div className="lan-entry">
         <button className="button" onClick={() => { setOpen(!open); if (isLAN()) void refresh(); }}>局域网连接</button>
         {status.state !== 'idle' && <span className={`lan-connection-state ${status.state}`} role="status" aria-label="服务连接状态">{status.state === 'connected' ? '服务已连接' : status.message}</span>}
-        {open && <GlassSurface className="panel lan-panel" aria-label="局域网连接">
+        {panelMotion.present && <GlassSurface className="panel lan-panel liquid-popover" aria-label="局域网连接"
+            data-state={panelMotion.entered ? 'open' : 'closed'} aria-hidden={!open || undefined} inert={!open}>
             <div className="panel-title">局域网多端控制<button className="icon-button" aria-label="关闭连接面板" onClick={() => setOpen(false)}>×</button></div>
             <p>服务端的打开网页、复制网址或二维码均可自动连接。首次使用请打开完整连接链接；局域网工作台可直接访问。</p>
             <form onSubmit={e => { e.preventDefault(); void connect(); }}>

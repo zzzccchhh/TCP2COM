@@ -41,7 +41,9 @@ cd ..
 
 Windows 桌面界面需要 Microsoft Edge WebView2 Runtime。
 
-新版工作台采用浅色液态玻璃界面：桌面 Chromium / WebView2 使用背景折射，手机、窄屏及其他浏览器使用毛玻璃回退。日志文字和表单内容保持清晰，系统的“减少动态效果”设置会关闭按压缩放与跟随光效。效果代码基于 [Liquid Glass Web](https://github.com/xiaofangstudio/liquid-glass-web)，固定版本随前端打包，无需 CDN 或在线背景图；来源与适配说明见 [vendor/README.md](frontend/src/vendor/README.md)，发布包包含 `third-party-licenses.txt`。
+新版工作台采用浅色液态玻璃界面：桌面 Chromium / WebView2 使用背景折射，手机和窄屏的大面板使用毛玻璃，小型滑块在支持 SVG 背景滤镜的 Chromium 中保留折射；其他浏览器使用毛玻璃回退。日志文字和表单内容保持清晰，系统的“减少动态效果”设置会关闭按压缩放、跟随光效和过渡动画。效果代码基于 [Liquid Glass Web](https://github.com/xiaofangstudio/liquid-glass-web)，固定版本随前端打包，无需 CDN 或在线背景图；来源与适配说明见 [vendor/README.md](frontend/src/vendor/README.md)，发布包包含 `third-party-licenses.txt`。
+
+网络角色、日志/流量、日志来源、USB/HTTP 和配置分页使用共享玻璃滑块。鼠标悬停可预览位置，按住拖动或触屏横滑时滑块跟手并轻微拉伸，松手后吸附并提交一次选择；取消手势不修改选项，触屏纵向滑动仍可滚动页面。选择字段会弹出玻璃选项面板，支持方向键、Home/End、Enter 和 Escape；COM、USB COM 和波特率保留手动输入及候选列表。抽屉、确认框和局域网面板均有进出动画，关闭动画结束后释放界面资源。
 
 | 入口 | 用途 |
 |---|---|
@@ -236,6 +238,8 @@ Windows 浏览器测试使用 Edge；其他平台需要 Playwright Chromium。`t
 软件验证记录（2026-11-02）：Python 245 项，238 项通过、7 项按环境跳过；前端生产构建和 26 项浏览器回归通过；上位机与 C5 生产 C 配置夹具配对通过，包含接口 0/3/4、网络角色和保存应答丢失不重放。
 
 液态玻璃界面验证（2026-11-03）：生产构建通过；Python 245 项全部通过；浏览器 29 项全部通过，包含折射渲染对比、尺寸变化、弹层实例清理、毛玻璃回退及减少动态效果。隐藏 WebView2 窗口的玻璃初始化、JS/Python 接口、TCP/串口回环和退出清理通过；真实 ESP/USB 与实体手机效果未在本轮验收。
+
+液态交互升级验证（2026-11-03）：生产构建、浏览器 37 项、Python 245 项全部通过；新增鼠标/触屏拖动、释放仅提交一次、取消手势、忙碌状态、纵向滚动、玻璃选择面板、键盘选择、退出动画反向衔接及实例清理检查。WebView2 玻璃控件初始化、JS/Python 接口和 TCP/串口回环通过；触屏检查使用浏览器模拟，实体手机效果仍待验证。
 
 测试覆盖旧 SPI 备份的 8081 端口与未生效复位选择，S3 仅 2.4 GHz 和原接口回归。主机替身、回环和浏览器检查不代表真实 ESP/USB、MCU 停发、SPI 时序、手机网络或持续无线吞吐已验收。本轮没有烧录或改动车端工程。
 

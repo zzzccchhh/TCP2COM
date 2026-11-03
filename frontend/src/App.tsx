@@ -10,6 +10,9 @@ import { applyDraft, call, defaults, deviceDefaults, download, emptySnapshot, is
 import type { Data } from './api';
 import Pairing from './Pairing';
 import GlassSurface from './GlassSurface';
+import GlassPicker from './GlassPicker';
+import LiquidSegments from './LiquidSegments';
+import { usePresence } from './usePresence';
 import { getLANStatus, isLAN } from './lan';
 
 type FieldProps = {
@@ -21,10 +24,8 @@ type FieldProps = {
 function Field({ label, value, onChange, options, disabled, type = 'text', hint, list, numeric }: FieldProps) {
     return <label className={`field ${disabled ? 'is-disabled' : ''}`}>
         <span className="field-label">{label}</span>
-        {options ? <span className="select-wrap"><select aria-label={label} value={value ?? ''} disabled={disabled}
-            onChange={e => onChange(numeric ? Number(e.target.value) : e.target.value)}>
-            {options.map(([key, text]) => <option key={key} value={key}>{text}</option>)}
-        </select><ChevronDown size={13} /></span> : <input aria-label={label} value={value ?? ''} disabled={disabled}
+        {options || list ? <GlassPicker label={label} value={value ?? ''} options={options} list={list} disabled={disabled}
+            onChange={next => onChange(numeric && (options || /^\d+$/.test(next)) ? Number(next) : next)} /> : <input aria-label={label} value={value ?? ''} disabled={disabled}
             type={type} list={list} autoComplete="off" spellCheck={false}
             onChange={e => onChange(numeric && /^\d+$/.test(e.target.value) ? Number(e.target.value) : e.target.value)} />}
         {hint && <small>{hint}</small>}
@@ -78,6 +79,10 @@ export default function App() {
     const [passwords, setPasswords] = useState<Data>({ ap: '', pc: '', shared: '' });
     const [clear, setClear] = useState<string[]>([]);
     const [confirm, setConfirm] = useState<Data | null>(null);
+    const drawerMotion = usePresence(drawer);
+    const confirmMotion = usePresence(confirm);
+    const shownDrawer = drawerMotion.value;
+    const shownConfirm = confirmMotion.value;
     const [resetHost, setResetHost] = useState('');
     const [resetPort, setResetPort] = useState('8081');
     const [samples, setSamples] = useState<number[][]>([]);
@@ -167,14 +172,15 @@ export default function App() {
     useEffect(() => { if (toast) { const timer = setTimeout(() => setToast(''), 6000); return () => clearTimeout(timer); } }, [toast]);
     useEffect(() => { if (autoscroll && logBody.current) logBody.current.scrollTop = logBody.current.scrollHeight; }, [logs, autoscroll, source, search, tab]);
     useEffect(() => {
-        function key(event: KeyboardEvent) { if (event.key === 'Escape') { if (confirm) setConfirm(null); else setDrawer(null); } }
+        function key(event: KeyboardEvent) { if (event.key === 'Escape') { if (confirmMotion.present) setConfirm(null); else setDrawer(null); } }
         window.addEventListener('keydown', key);
         return () => window.removeEventListener('keydown', key);
-    }, [confirm]);
+    }, [confirmMotion.present]);
+    useEffect(() => { window.dispatchEvent(new Event('workspace-overlay-change')); }, [drawer, confirm]);
     useEffect(() => {
-        document.body.style.overflow = drawer || confirm ? 'hidden' : '';
+        document.body.style.overflow = drawerMotion.present || confirmMotion.present ? 'hidden' : '';
         const previousFocus = document.activeElement as HTMLElement | null;
-        const modal = document.querySelector(confirm ? '.confirm-dialog' : '.drawer') as HTMLElement | null;
+        const modal = document.querySelector(confirmMotion.present ? '.confirm-dialog' : '.drawer') as HTMLElement | null;
         const selector = 'button:not(:disabled), input:not(:disabled):not([hidden]), select:not(:disabled), [tabindex="0"]';
         modal?.querySelector<HTMLElement>(selector)?.focus();
         function trap(event: KeyboardEvent) {
@@ -186,7 +192,7 @@ export default function App() {
         }
         window.addEventListener('keydown', trap);
         return () => { document.body.style.overflow = ''; window.removeEventListener('keydown', trap); previousFocus?.focus(); };
-    }, [drawer, confirm]);
+    }, [drawerMotion.present, confirmMotion.present, shownDrawer]);
 
     function change(key: string, value: any) {
         const next = { ...settingsRef.current, [key]: value };
@@ -300,9 +306,8 @@ export default function App() {
         </header>
 
         <section className="page-heading"><div aria-hidden="true" />
-            <div className="device-switch"><span>当前设备</span><div className="select-wrap"><select aria-label="当前设备" disabled={waiting} value={device} onChange={e => change('device', e.target.value)}>
-                {Object.entries(labels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-            </select><ChevronDown size={14} /></div></div>
+            <div className="device-switch"><span>当前设备</span><GlassPicker label="当前设备" disabled={waiting} value={device}
+                onChange={next => change('device', next)} options={Object.entries(labels).map(([key, text]) => [key, String(text)])} /></div>
         </section>
 
         {!native && ready && <div className="preview-banner"><Info size={14} /><span>浏览器界面预览 · 打开服务端的连接链接或扫码可自动连接，也可通过右上角「局域网连接」重试。</span></div>}
@@ -311,9 +316,10 @@ export default function App() {
             <aside className="connection-column">
                 <GlassSurface className="panel connection-panel"><div className="panel-title"><span><Network size={17} />连接设置</span><span className="section-number">01</span></div>
                     <fieldset disabled={waiting}>
-                        <div className="segmented mode-switch" aria-label="电脑网络角色">
-                            {[['tcp-client', 'TCP 客户端'], ['tcp-server', 'TCP 服务端'], ['udp', 'UDP']].map(([value, label]) => <button key={value} aria-pressed={settings.mode === value} className={settings.mode === value ? 'selected' : ''} onClick={() => change('mode', value)}>{label}</button>)}
-                        </div>
+                        <LiquidSegments className="mode-switch" label="电脑网络角色" value={settings.mode} disabled={waiting}
+                            onChange={next => change('mode', next)} items={[
+                                { value: 'tcp-client', label: 'TCP 客户端' }, { value: 'tcp-server', label: 'TCP 服务端' }, { value: 'udp', label: 'UDP' },
+                            ]} />
                         <div className="form-stack">
                             {settings.mode !== 'tcp-server' && field('host', '设备 IPv4 地址')}
                             <div className={settings.mode !== 'tcp-client' ? 'form-grid' : ''}>
@@ -347,10 +353,8 @@ export default function App() {
             </aside>
 
             <section className="center-column">
-                <div className="workspace-toolbar"><div className="segmented workspace-tabs">
-                    <button className={tab === 'logs' ? 'selected' : ''} onClick={() => setTab('logs')}><Terminal size={15} />运行日志</button>
-                    <button className={tab === 'traffic' ? 'selected' : ''} onClick={() => setTab('traffic')}><Activity size={15} />流量监测</button>
-                </div><div className="connection-status" data-state={connectionState} role="status" aria-label="网络连接状态" aria-live="polite" title={snap.address}>
+                <div className="workspace-toolbar"><LiquidSegments className="workspace-tabs" label="工作区视图" value={tab} onChange={setTab}
+                    items={[{ value: 'logs', label: <><Terminal size={15} />运行日志</> }, { value: 'traffic', label: <><Activity size={15} />流量监测</> }]} /><div className="connection-status" data-state={connectionState} role="status" aria-label="网络连接状态" aria-live="polite" title={snap.address}>
                     {udpMode ? <Radio size={15} /> : tcpConnected ? <Wifi size={15} /> : snap.running ? <RefreshCw size={15} /> : <Unplug size={15} />}
                     <span>{connectionLabel}</span>
                 </div></div>
@@ -361,7 +365,8 @@ export default function App() {
                                 <button className="icon-button" title="导出全部缓存日志" aria-label="导出日志" onClick={() => run(async () => download('wifi-bridge.log', await call('export_logs')))}><Download size={15} /></button>
                                 <button className="icon-button" title="清空日志" aria-label="清空日志" onClick={() => run(async () => { await call('clear_logs'); setLogs([]); })}><Trash2 size={15} /></button></div>
                         </div>
-                        <div className="log-sources">{[['all', '全部'], ['host', '上位机'], ['usb', 'ESP（USB）']].map(([value, label]) => <button key={value} className={source === value ? 'current' : ''} onClick={() => setSource(value)}>{label}{value === 'all' && <span>{logs.length}</span>}</button>)}<span className="log-retention">最近 3,000 行</span></div>
+                        <div className="log-sources"><LiquidSegments className="log-filter" label="日志来源" value={source} onChange={setSource}
+                            items={[{ value: 'all', label: <>全部<span>{logs.length}</span></> }, { value: 'host', label: '上位机' }, { value: 'usb', label: 'ESP（USB）' }]} /><span className="log-retention">最近 3,000 行</span></div>
                         <div className="log-body" ref={logBody} role="log" aria-label="运行日志" aria-live="off">
                             {visibleLogs.length ? logRows : <div className="empty-log"><span className="empty-symbol"><Terminal size={27} strokeWidth={1.3} /></span><h2>{search || source !== 'all' ? '没有匹配的日志' : '等待连接，准备就绪'}</h2><p>{search || source !== 'all' ? '试试其他关键词或切换日志来源。' : '启动桥接，或单独连接 USB。\n连接事件与设备日志将在这里显示。'}</p><span className="terminal-prompt"><i />READY WHEN YOU ARE</span></div>}
                         </div>
@@ -385,7 +390,8 @@ export default function App() {
 
                 <GlassSurface className="panel device-panel"><div className="panel-title"><span><Settings2 size={17} />设备配置</span><span className="section-number">02</span></div>
                     <div className="device-identity"><span className="chip-icon"><Radio size={24} strokeWidth={1.4} /></span><div><h2>{labels[device]}</h2><p>{device === 'c5' ? '双频 Wi-Fi · UART / SPI' : device === 's3' ? '2.4 GHz Wi-Fi · UART / SPI' : '2.4 GHz Wi-Fi · UART'}</p></div></div>
-                    {caps ? <><div className="segmented transport-switch">{[['usb', 'USB 配置'], ['http', 'Wi-Fi / HTTP']].map(([value, label]) => <button key={value} disabled={waiting} className={settings.config_transport === value ? 'selected' : ''} onClick={() => change('config_transport', value)}>{label}</button>)}</div>
+                    {caps ? <><LiquidSegments className="transport-switch" label="设备配置连接方式" value={settings.config_transport} disabled={waiting}
+                        onChange={next => change('config_transport', next)} items={[{ value: 'usb', label: 'USB 配置' }, { value: 'http', label: 'Wi-Fi / HTTP' }]} />
                         {settings.config_transport === 'http' && <div className="http-field">{field('config_url', '设备配置地址', { disabled: waiting })}</div>}
                         <div className="device-read-state"><span className={`status-dot ${snap.baseline ? 'online' : ''}`} />{snap.baseline ? `已读取 · 修订 ${snap.baseline.revision ?? '—'}` : '尚未读取设备配置'}</div>
                         <div className="device-facts"><div><span>业务接口</span><strong>{snap.baseline ? (linkOptions.find(([value]) => value === snap.baseline.link_mode)?.[1] ?? '接口已移除') : '—'}</strong></div><div><span>联网模式</span><strong>{snap.baseline ? ['自建热点 AP', '电脑热点 STA', '共享 Wi-Fi STA'][snap.baseline.mode] : '—'}</strong></div></div>
@@ -409,14 +415,15 @@ export default function App() {
         <datalist id="serial-ports">{ports.map(port => <option key={port.device} value={port.device}>{port.description}</option>)}</datalist>
         <datalist id="baud-rates">{[9600, 115200, 460800, 921600, 1152000, 2000000, 3000000].map(value => <option key={value} value={value} />)}</datalist>
 
-        {drawer && <div className="drawer-backdrop" onClick={() => { if (!confirm) setDrawer(null); }}><GlassSurface className={`drawer ${drawer === 'config' ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={{ config: '设备配置面板', diagnostics: '链路诊断', reset: '远程复位', help: '使用帮助' }[drawer]} onClick={e => e.stopPropagation()}>
-            <div className="drawer-heading"><div><div className="eyebrow">{drawer === 'config' ? 'DEVICE CONFIGURATION' : drawer === 'diagnostics' ? 'LINK DIAGNOSTICS' : drawer === 'reset' ? 'REMOTE RESET' : 'QUICK START'}</div><h2>{{ config: `${labels[device]} 设备配置`, diagnostics: '链路诊断', reset: '远程复位', help: '开始使用工作台' }[drawer]}</h2></div><button className="icon-button" aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20} /></button></div>
+        {shownDrawer && <div className="drawer-backdrop liquid-overlay" data-state={drawerMotion.entered ? 'open' : 'closed'} aria-hidden={!drawer || undefined} inert={!drawer} onClick={() => { if (!confirm) setDrawer(null); }}><GlassSurface className={`drawer ${shownDrawer === 'config' ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={{ config: '设备配置面板', diagnostics: '链路诊断', reset: '远程复位', help: '使用帮助' }[shownDrawer]} onClick={e => e.stopPropagation()}>
+            <div className="drawer-heading"><div><div className="eyebrow">{shownDrawer === 'config' ? 'DEVICE CONFIGURATION' : shownDrawer === 'diagnostics' ? 'LINK DIAGNOSTICS' : shownDrawer === 'reset' ? 'REMOTE RESET' : 'QUICK START'}</div><h2>{{ config: `${labels[device]} 设备配置`, diagnostics: '链路诊断', reset: '远程复位', help: '开始使用工作台' }[shownDrawer]}</h2></div><button className="icon-button" aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20} /></button></div>
             <div className="drawer-body">
-                {drawer === 'config' && <>
+                {shownDrawer === 'config' && <>
                     <div className="notice"><Info size={16} /><span>{snap.config_status}{!snap.baseline && '。保存前必须从当前设备重新读取。'}</span></div>
                     <div className="config-toolbar"><button className="button primary" disabled={waiting} onClick={() => run(readConfig)}><RefreshCw size={14} />读取设备</button><button className="button" disabled={waiting || !snap.baseline} onClick={() => { const next = structuredClone(snap.baseline); setConfig(next); cacheDraft(next); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); }}><RotateCcw size={14} />撤销编辑</button><button className="button" disabled={waiting || !drafts[device]} onClick={restoreDraft}><History size={14} />恢复草稿</button></div>
                     {snap.baseline && <p className={`config-edit-state ${configDirty ? 'dirty' : ''}`}>{configDirty ? '已修改，尚未保存到设备' : snap.baseline.unsaved || snap.baseline.migration_requires_setup ? '当前运行配置待明确保存并重启' : '与本次读取的配置一致'}</p>}
-                    <div className="segmented config-tabs">{[['common', '接口与联网'], ['ap', '自建热点'], ['pc', '电脑热点'], ['shared', '共享 Wi-Fi']].map(([value, label]) => <button key={value} className={configTab === value ? 'selected' : ''} onClick={() => setConfigTab(value)}>{label}</button>)}</div>
+                    <LiquidSegments className="config-tabs" label="配置分页" value={configTab} onChange={setConfigTab}
+                        items={[{ value: 'common', label: '接口与联网' }, { value: 'ap', label: '自建热点' }, { value: 'pc', label: '电脑热点' }, { value: 'shared', label: '共享 Wi-Fi' }]} />
                     {configTab === 'common' ? <div className="config-sections">
                         <div className="config-section"><h3>业务接口</h3><div className="form-grid">
                             {cf('link_mode', 'MCU 接口', { numeric: true, options: linkOptions })}
@@ -448,7 +455,7 @@ export default function App() {
                     <div className="backup-actions"><button className="text-button" disabled={waiting} onClick={() => run(async () => { const data = await call('backup_config', config); download(`${device}-config-backup.json`, JSON.stringify(data, null, 2), 'application/json'); })}><Download size={14} />备份配置</button><button className="text-button" disabled={waiting} onClick={() => importInput.current?.click()}><FileJson size={14} />导入备份</button><small>备份与草稿均不含密码</small></div>
                     <input type="file" hidden ref={importInput} accept=".json,application/json" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) run(async () => { if (file.size > 131072) throw new Error('备份文件过大'); const next = await call('import_config', await file.text()); setConfig(next); cacheDraft(next); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await pendingDraft.current; notify('已导入编辑区；尚未写入设备'); }); }} />
                 </>}
-                {drawer === 'diagnostics' && <>
+                {shownDrawer === 'diagnostics' && <>
                     <h3>串口与队列</h3><dl className="diagnostic-list">{[
                         ['网络→COM 待写', size(snap.queued)], ['队列历史峰值', size(snap.peak)],
                         ['COM 写平均 / 最大', `${stats.serial_write_calls ? Math.round(stats.serial_write_us / stats.serial_write_calls) : 0} / ${stats.serial_write_max_us || 0} μs`],
@@ -461,16 +468,16 @@ export default function App() {
                         <h3>固件诊断字段</h3><div className={`notice ${usbStale ? 'warning' : ''}`}><Info size={15} /><span>{!snap.usb ? 'USB 未连接' : !usbOnline ? 'USB 离线 / 重试中，旧数值不代表设备在线' : snap.usb.age == null ? '尚未收到 stats' : `stats ${snap.usb.age.toFixed(1)} 秒前更新${usbStale ? '（已过期）' : ''}`}</span></div>
                         <dl className="diagnostic-list">{Object.entries(snap.usb?.fields || {}).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl></>}
                 </>}
-                {drawer === 'reset' && <><div className="notice"><Zap size={16} /><span>在 3 秒内连续点击 5 次触发复位。</span></div>{device !== 'esp01s' && <div className="form-stack"><Field label="设备 IPv4 地址" value={resetHost} disabled={snap.reset.busy} onChange={setResetHost} /><Field label="控制端口" value={resetPort} disabled={snap.reset.busy} onChange={setResetPort} /></div>}
+                {shownDrawer === 'reset' && <><div className="notice"><Zap size={16} /><span>在 3 秒内连续点击 5 次触发复位。</span></div>{device !== 'esp01s' && <div className="form-stack"><Field label="设备 IPv4 地址" value={resetHost} disabled={snap.reset.busy} onChange={setResetHost} /><Field label="控制端口" value={resetPort} disabled={snap.reset.busy} onChange={setResetPort} /></div>}
                     <div className="reset-progress">{Array.from({ length: 5 }, (_, i) => <i key={i} className={i < snap.reset.count ? 'filled' : ''} />)}</div>
                     <button className="button primary full" disabled={snap.reset.busy} onClick={() => run(() => call('reset_click', resetHost, resetPort))}><Zap size={15} />{snap.reset.busy ? '复位请求进行中…' : `复位外部主控 · ${snap.reset.count}/5`}</button><p className="small-copy">{snap.reset.message}</p>
                 </>}
-                {drawer === 'help' && <><div className="help-step"><span>01</span><div><h3>选择设备与连接角色</h3><p>TCP 客户端主动连接设备；TCP 服务端等待设备连接；UDP 使用固定对端。</p></div></div><div className="help-step"><span>02</span><div><h3>设置业务 COM，启动桥接</h3><p>程序打开已有串口。需要虚拟串口时，请先创建串口对。电脑本地波特率不会修改设备 UART。</p></div></div><div className="help-step"><span>03</span><div><h3>按需连接 USB</h3><p>C5/S3 的 USB 用于日志和配置，可独立运行。使用 ESP-IDF monitor 前先断开 USB，等待释放端口。</p></div></div><div className="help-step"><span>04</span><div><h3>读取、编辑、明确保存</h3><p>进入配网后读取当前设备，再编辑并保存。保存会写入 NVS 并重启；保存结果不明时先重新读取核对。</p></div></div><div className="notice"><Info size={16} /><span>关闭主窗口会停止桥接并释放串口。最小化窗口继续转发。停止按钮同时关闭业务桥接与 USB。</span></div></>}
+                {shownDrawer === 'help' && <><div className="help-step"><span>01</span><div><h3>选择设备与连接角色</h3><p>TCP 客户端主动连接设备；TCP 服务端等待设备连接；UDP 使用固定对端。</p></div></div><div className="help-step"><span>02</span><div><h3>设置业务 COM，启动桥接</h3><p>程序打开已有串口。需要虚拟串口时，请先创建串口对。电脑本地波特率不会修改设备 UART。</p></div></div><div className="help-step"><span>03</span><div><h3>按需连接 USB</h3><p>C5/S3 的 USB 用于日志和配置，可独立运行。使用 ESP-IDF monitor 前先断开 USB，等待释放端口。</p></div></div><div className="help-step"><span>04</span><div><h3>读取、编辑、明确保存</h3><p>进入配网后读取当前设备，再编辑并保存。保存会写入 NVS 并重启；保存结果不明时先重新读取核对。</p></div></div><div className="notice"><Info size={16} /><span>关闭主窗口会停止桥接并释放串口。最小化窗口继续转发。停止按钮同时关闭业务桥接与 USB。</span></div></>}
             </div>
-            {drawer === 'config' && <div className="drawer-footer"><span><ShieldCheck size={14} />明确保存后写入设备 NVS</span><button className="button primary" disabled={waiting || !snap.baseline || (device === 'c5' && config.link_mode === -1)} onClick={() => run(async () => { const preview = await call<Data>('preview_save', config, passwords, clear); if (!preview.needed) notify('没有修改，无需保存'); else setConfirm({ ...preview, config: structuredClone(config), passwords: { ...passwords }, clear: [...clear] }); })}><Check size={15} />保存并重启</button></div>}
+            {shownDrawer === 'config' && <div className="drawer-footer"><span><ShieldCheck size={14} />明确保存后写入设备 NVS</span><button className="button primary" disabled={waiting || !snap.baseline || (device === 'c5' && config.link_mode === -1)} onClick={() => run(async () => { const preview = await call<Data>('preview_save', config, passwords, clear); if (!preview.needed) notify('没有修改，无需保存'); else setConfirm({ ...preview, config: structuredClone(config), passwords: { ...passwords }, clear: [...clear] }); })}><Check size={15} />保存并重启</button></div>}
         </GlassSurface></div>}
 
-        {confirm && <div className="modal-backdrop"><GlassSurface className="confirm-dialog" role="dialog" aria-modal="true" aria-label="确认保存设备配置"><div className="confirm-icon"><Settings2 size={22} /></div><h2>保存配置并重启？</h2><p>以下修改将写入 {labels[device]} 的 NVS。<br />设备重启期间业务连接会中断。</p><div className="change-list">{confirm.changes.length ? confirm.changes.map((item: Data) => <div key={item.field}><span>{item.field}</span><strong>{item.value}</strong></div>) : <p>明确保存当前运行配置</p>}</div><div className="dialog-actions"><button className="button" disabled={working} onClick={() => setConfirm(null)}>取消</button><button className="button primary" disabled={working} onClick={() => run(async () => { const pending = confirm; setConfirm(null); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await call('save_device', pending.config, pending.passwords, pending.clear, pending.epoch); notify('设备已确认保存并请求重启，请重新读取核对'); })}>{working && <LoaderCircle size={14} className="spin" />}确认保存并重启</button></div></GlassSurface></div>}
+        {shownConfirm && <div className="modal-backdrop liquid-overlay" data-state={confirmMotion.entered ? 'open' : 'closed'} aria-hidden={!confirm || undefined} inert={!confirm}><GlassSurface className="confirm-dialog" role="dialog" aria-modal="true" aria-label="确认保存设备配置"><div className="confirm-icon"><Settings2 size={22} /></div><h2>保存配置并重启？</h2><p>以下修改将写入 {labels[device]} 的 NVS。<br />设备重启期间业务连接会中断。</p><div className="change-list">{shownConfirm.changes.length ? shownConfirm.changes.map((item: Data) => <div key={item.field}><span>{item.field}</span><strong>{item.value}</strong></div>) : <p>明确保存当前运行配置</p>}</div><div className="dialog-actions"><button className="button" disabled={working} onClick={() => setConfirm(null)}>取消</button><button className="button primary" disabled={working} onClick={() => run(async () => { const pending = shownConfirm; setConfirm(null); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await call('save_device', pending.config, pending.passwords, pending.clear, pending.epoch); notify('设备已确认保存并请求重启，请重新读取核对'); })}>{working && <LoaderCircle size={14} className="spin" />}确认保存并重启</button></div></GlassSurface></div>}
         {toast && <div className="toast" role="status"><Info size={16} /><span>{toast}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setToast('')}><X size={14} /></button></div>}
     </div>;
 }

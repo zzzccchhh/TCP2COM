@@ -31,6 +31,8 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
     const id = `liquid-glass-${++sequence}`;
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.classList.add('liquid-glass-defs');
+    const control = element.classList.contains('liquid-indicator');
+    svg.dataset.glassKind = control ? 'control' : 'surface';
     svg.setAttribute('width', '0');
     svg.setAttribute('height', '0');
     svg.setAttribute('aria-hidden', 'true');
@@ -72,7 +74,8 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
     function update() {
         frame = 0;
         if (disposed) return;
-        if (!context || compact.matches || !fine.matches) { reset(); return; }
+        // Small moving controls retain refraction on touch screens; large panels use the lighter fallback.
+        if (!context || (!control && (compact.matches || !fine.matches))) { reset(); return; }
         const width = element.offsetWidth;
         const height = element.offsetHeight;
         if (width < 2 || height < 2) { reset(); return; }
@@ -119,7 +122,7 @@ export function attachLiquidGlass(element: HTMLElement): () => void {
             image.setAttribute('href', canvas.toDataURL());
             displacement.setAttribute('scale', String(extent * 2));
             if (!svg.isConnected) document.body.append(svg);
-            element.style.setProperty('--glass-refraction', `url("#${id}") blur(12px) saturate(1.35)`);
+            element.style.setProperty('--glass-refraction', `url("#${id}") blur(${control ? 1.5 : 12}px) saturate(1.35)`);
             element.dataset.glass = 'refractive';
             lastSize = key;
         } catch {
