@@ -107,6 +107,22 @@ class StartupTests(unittest.TestCase):
         factory.return_value._shutdown.assert_called_once()
         show.assert_not_called()
 
+    def test_desktop_theme_reaches_first_paint_and_matches_the_window_background(self):
+        self.build_entry()
+        from desktop_appearance import preference_path, save_preference
+        for preference, theme in (("dark", "dark"), ("light", "light"), ("system", "dark")):
+            with self.subTest(preference=preference):
+                save_preference(preference_path(), preference)
+                webview = mock.MagicMock(settings={})
+                with mock.patch.object(launcher, "_runtime", return_value=webview), \
+                        mock.patch.object(launcher, "resolved_theme", return_value=theme), \
+                        mock.patch("web_service.WebService") as factory:
+                    self.assertEqual(launcher.main([]), 0)
+                params, options = webview.create_window.call_args
+                self.assertTrue(params[1].endswith("index.html#desktop-appearance=" + preference))
+                self.assertEqual(options["background_color"], "#08080A" if theme == "dark" else "#F1F0EA")
+                factory.assert_called_once_with(appearance_path=preference_path())
+
     def test_unwritable_log_directory_falls_back_to_temporary_directory(self):
         blocked = self.base / "blocked"
         blocked.write_text("file", encoding="utf-8")

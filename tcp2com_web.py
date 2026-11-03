@@ -14,6 +14,8 @@ import sys
 import tempfile
 import threading
 
+from desktop_appearance import BACKGROUNDS, load_preference, preference_path, resolved_theme
+
 BASE = Path(__file__).resolve().parent
 
 
@@ -112,10 +114,15 @@ def _launch(args):
     webview = _runtime()
     from web_service import WebService
     webview.settings["ALLOW_DOWNLOADS"] = True
-    service = WebService()
+    appearance_path = preference_path()
+    appearance = load_preference(appearance_path)
+    service = WebService(appearance_path=appearance_path)
     try:
-        window = webview.create_window("Wi-Fi Bridge · 无线串口工作台", str(entry), js_api=service,
-                                       width=1420, height=920, min_size=(960, 680), background_color="#F1F0EA")
+        # pywebview preserves fragments when mapping local files to its private HTTP server.
+        url = str(entry) + "#desktop-appearance=" + appearance
+        window = webview.create_window("Wi-Fi Bridge · 无线串口工作台", url, js_api=service,
+                                       width=1420, height=920, min_size=(960, 680),
+                                       background_color=BACKGROUNDS[resolved_theme(appearance)])
         window.events.closing += service._shutdown
         webview.start(gui="edgechromium", debug=args.debug, http_server=True)
     finally:

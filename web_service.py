@@ -16,6 +16,7 @@ from serial.tools import list_ports
 from c5_config import C5Client, ConfigError, changed_config, public_config, public_draft_config
 from c5_usb_config import C5USBClient
 from device_capabilities import capabilities
+from desktop_appearance import save_preference
 from gui_state import CHOICES, BOOLEANS, DRAFT_FIELDS, FORM_FIELDS, VERSION, clean_state, load_state, save_state
 from gui_support import BridgeController, default_settings, load_profile, settings_to_args
 from reset_control import FiveClickGate, ResetError, perform_reset
@@ -78,10 +79,11 @@ def draft_to_config(draft, device):
 
 
 class WebService:
-    def __init__(self, controller=None, state_path=None):
+    def __init__(self, controller=None, state_path=None, appearance_path=None):
         self._lock = threading.RLock()
         self._controller = controller or BridgeController()
         self._path = Path(state_path) if state_path else BASE / "tcp2com_last_state.json"
+        self._appearance_path = Path(appearance_path) if appearance_path is not None else None
         self._settings = {**default_settings(), "device": "c5", "mode": "tcp-server", "com": "COM1"}
         self._drafts = {}
         self._baseline = self._identity = None
@@ -128,6 +130,15 @@ class WebService:
                     value = self._settings.get(key)
                     self._settings[key] = "" if value is None else str(value)
         self._controller.ui.message("Wi-Fi Bridge 工作台已就绪。业务桥接与 USB 需要手动连接。")
+
+    @endpoint
+    def set_appearance(self, value):
+        if self._appearance_path is None:
+            raise ValueError("外观偏好由当前终端保存")
+        with self._lock:
+            self._ensure_open()
+            save_preference(self._appearance_path, value)
+        return True
 
     def _document(self):
         return {"version": VERSION, "forms": {name: {key: self._settings.get(key, "") for key in keys}

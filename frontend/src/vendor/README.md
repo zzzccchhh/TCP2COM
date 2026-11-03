@@ -61,5 +61,18 @@ also retains its displayed content. Transition completion releases retained
 nodes with a timeout fallback; reopening cancels cleanup. Focus returns without
 scrolling and without stealing it from another dialog.
 
+The material palette now uses shared CSS variables with original warm light and
+near-black purple dark appearances. The root theme covers body-level portals too.
+Theme changes retain optical instances and geometry, recolouring the tint,
+edge highlights, shadows, labels and semantic statuses without a page filter.
+Dark glass uses pale lavender rim light and restrained local glow, with black
+drop shadows kept separate. Light mode keeps its original warm palette.
+A blocking local bootstrap applies the preference before React/CSS first paint.
+Browser preferences stay origin-local; native startup supplies a validated
+fragment and matching window background, while a desktop-only API saves the
+appearance separately from device state. Native writes are serialized, storage
+errors leave the current appearance usable, and system events apply only when
+selected. This does not enable persistence for the whole WebView profile.
+
 No CDN, remote image or runtime download is required. Update this commit and
 recheck the browser/WebView2 rendering when changing the upstream implementation.

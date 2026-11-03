@@ -15,17 +15,21 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from web_service import WebService
 import tcp2com_web
+from desktop_appearance import load_preference, save_preference
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--result-file", type=Path, help="Write results for a pythonw invocation")
     parser.add_argument("--visible", action="store_true", help="Also verify that the real desktop window is visible")
+    parser.add_argument("--appearance", choices=("light", "dark"), default="dark", help="Verify first-paint desktop appearance")
     args = parser.parse_args()
     import webview
 
     directory = tempfile.TemporaryDirectory()
-    service = WebService(state_path=Path(directory.name) / "state.json")
+    appearance_path = Path(directory.name) / "appearance.json"
+    save_preference(appearance_path, args.appearance)
+    service = WebService(state_path=Path(directory.name) / "state.json", appearance_path=appearance_path)
     window = None
     create_window, start = webview.create_window, webview.start
     results = []
@@ -56,6 +60,20 @@ def main():
                 time.sleep(.1)
             else:
                 raise AssertionError("React did not connect to the native API")
+            theme = window.evaluate_js("document.documentElement.dataset.theme")
+            if theme != args.appearance:
+                raise AssertionError(f"Desktop startup lost its appearance: {theme}")
+            next_theme = "light" if theme == "dark" else "dark"
+            window.evaluate_js(f"""(() => {{
+                const select = document.querySelector('select[aria-label="外观"]');
+                select.value = '{next_theme}'; select.dispatchEvent(new Event('change', {{bubbles: true}}));
+            }})()""")
+            deadline = time.monotonic() + 8
+            while load_preference(appearance_path) != next_theme and time.monotonic() < deadline:
+                time.sleep(.05)
+            if load_preference(appearance_path) != next_theme:
+                raise AssertionError("Desktop theme change was not persisted")
+            print(f"PASS: WebView2 appearance ({theme} startup, {next_theme} persistence)")
             optics = window.evaluate_js("""(() => {
                 const card = document.querySelector('.connection-panel');
                 return {mode: card?.dataset.glass,
@@ -136,6 +154,7 @@ def main():
 
     try:
         with mock.patch("web_service.WebService", return_value=service), \
+                mock.patch.object(tcp2com_web, "preference_path", return_value=appearance_path), \
                 mock.patch.object(webview, "create_window", side_effect=create_instrumented), \
                 mock.patch.object(webview, "start", side_effect=start_and_verify), \
                 mock.patch.object(tcp2com_web, "_show_error", side_effect=lambda message, *_: results.append(RuntimeError(message))):

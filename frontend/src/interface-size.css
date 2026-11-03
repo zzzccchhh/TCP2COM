@@ -50,7 +50,7 @@
 .terminal-footer { flex-wrap: wrap; }
 .runtime-line { flex-wrap: wrap; }
 .chart-plot svg { height: 140px; }
-.chart-axis, .chart-scale { font-size: var(--text-micro); color: #71839e; }
+.chart-axis, .chart-scale { font-size: var(--text-micro); color: var(--muted); }
 .metric { padding-inline: 20px; }
 .metric strong { font-size: 26px; }
 .device-identity h2 { font-size: 17px; }
@@ -66,7 +66,7 @@
 .lan-connection-state { top: calc(var(--control-height) + 6px); }
 .lan-entry > .button { font-size: var(--text-body); }
 .text-button { min-height: 28px; }
-.field small, .connection-note, .setup-note, .device-read-state, .device-facts span, .device-identity p, .log-row time, .log-origin, .terminal-footer, .runtime-line, .metric small, .page-footer { color: #63758f; }
+.field small, .connection-note, .setup-note, .device-read-state, .device-facts span, .device-identity p, .log-row time, .log-origin, .terminal-footer, .runtime-line, .metric small, .page-footer { color: var(--muted); }
 
 /* Two columns put connection and device actions first; logs use the next full row. */
 @media (max-width: 1350px) and (min-width: 761px) {

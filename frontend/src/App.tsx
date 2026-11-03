@@ -17,6 +17,7 @@ import LiquidDisclosure from './LiquidDisclosure';
 import { usePresence } from './usePresence';
 import { useReturnFocus } from './useReturnFocus';
 import { getLANStatus, isLAN } from './lan';
+import { chooseAppearance, useAppearance } from './appearance';
 
 type FieldProps = {
     label: string; value: any; onChange: (value: any) => void;
@@ -54,6 +55,7 @@ function Chart({ samples, index, label, color }: { samples: number[][]; index: n
 }
 
 export default function App() {
+    const appearance = useAppearance();
     const [settings, setSettings] = useState<Data>(defaults);
     const settingsRef = useRef(settings);
     const pendingSettings = useRef<Promise<any>>(Promise.resolve());
@@ -321,7 +323,9 @@ export default function App() {
                 <span className="version">DESKTOP / 1.0</span></div>
         </header>
 
-        <section className="page-heading"><div aria-hidden="true" />
+        <section className="page-heading"><div className="device-switch appearance-switch"><span>外观</span><GlassPicker label="外观" value={appearance}
+            onChange={next => { void chooseAppearance(next).catch(() => notify('外观已切换，但未能保存；重启后可能恢复原设置。')); }}
+            options={[["light", "原始浅色"], ["dark", "深色"], ["system", "跟随系统"]]} /></div>
             <div className="device-switch"><span>当前设备</span><GlassPicker label="当前设备" disabled={waiting} value={device}
                 onChange={next => change('device', next)} options={Object.entries(labels).map(([key, text]) => [key, String(text)])} /></div>
         </section>
@@ -388,9 +392,9 @@ export default function App() {
                         </div>
                         <div className="terminal-footer"><span><i className={`status-dot ${snap.connected ? 'online' : ''}`} />{autoscroll ? '自动滚动' : '已暂停滚动'}</span><span>UTF-8<span className="footer-dot">·</span>{visibleLogs.length} 行{snap.log_dropped > 0 && ` · 队列丢弃 ${snap.log_dropped}`}</span></div>
                     </> : <div className="traffic-view"><div className="traffic-title"><div><h2>链路流量</h2><p>桥接实际字节统计 · 最近 30 秒</p></div><span className={`live-label ${trafficActive ? 'active' : snap.running ? 'paused' : ''}`}><i />{trafficActive ? 'LIVE' : snap.running ? 'PAUSED' : 'IDLE'}</span></div>
-                        <Chart samples={samples} index={0} label="网络接收" color="#526b58" />
-                        <Chart samples={samples} index={1} label="COM 写入" color="#707e9c" />
-                        <Chart samples={samples} index={2} label="网络发送" color="#a18256" />
+                        <Chart samples={samples} index={0} label="网络接收" color="var(--chart-receive)" />
+                        <Chart samples={samples} index={1} label="COM 写入" color="var(--chart-write)" />
+                        <Chart samples={samples} index={2} label="网络发送" color="var(--chart-send)" />
                         {udpMode && <p className="traffic-note">UDP 桥接运行时更新曲线；已绑定不代表设备在线。</p>}
                     </div>}
                 </section>
