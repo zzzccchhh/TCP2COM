@@ -36,8 +36,6 @@
 .disclosure-trigger { min-height: var(--control-height); font-size: var(--text-label); }
 .check { font-size: var(--text-body); min-height: var(--control-height); }
 .liquid-toggle-track { flex-basis: var(--toggle-width); height: var(--toggle-height); }
-.liquid-toggle-thumb { width: calc(var(--toggle-height) - 4px); height: calc(var(--toggle-height) - 4px); transform: translateX(calc(var(--toggle-progress) * (var(--toggle-width) - var(--toggle-height)))); }
-.liquid-toggle[data-dragging] .liquid-toggle-thumb { transform: translateX(calc(var(--toggle-progress) * (var(--toggle-width) - var(--toggle-height)))) scale(1.1, .95); }
 .toggle-state-on, .toggle-state-off { top: calc(50% - 4px); }
 .liquid-check-mark { flex-basis: 28px; height: 28px; }
 .log-toolbar { padding: 16px; flex-wrap: wrap; }
@@ -96,7 +94,4 @@
     .config-section .form-grid { grid-template-columns: minmax(0, 1fr); }
     .lan-entry > .button { padding-inline: 10px; }
     .lan-connection-state { top: 72px; }
-}
-@media (prefers-reduced-motion: reduce) {
-    .liquid-toggle[data-dragging] .liquid-toggle-thumb { transform: translateX(calc(var(--toggle-progress) * (var(--toggle-width) - var(--toggle-height)))); }
 }

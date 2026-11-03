@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import GlassSurface from './GlassSurface';
+import { useLiquidLens } from './useLiquidLens';
 
 type Item = { value: string; label: ReactNode; disabled?: boolean };
 type Rect = { left: number; top: number; width: number; height: number };
@@ -13,7 +14,7 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
     const drag = useRef<{ id: number; index: number; startX: number; startY: number; origin: Rect; moved: boolean } | null>(null);
     const sample = useRef({ x: 0, time: 0, velocity: 0 });
     const lens = useRef<HTMLElement | null>(null);
-    const motion = useRef({ frame: 0, bend: 0, speed: 0 });
+    const motion = useLiquidLens(lens);
     const [visual, setVisual] = useState<Rect>({ left: 3, top: 3, width: 0, height: 0 });
     const [preview, setPreview] = useState(-1);
     const [dragging, setDragging] = useState(false);
@@ -28,38 +29,12 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
         setPreview(-1);
     }
 
-    // Only the local lens changes shape. Its sampling bitmap and anchor stay stable.
-    function relax() {
-        if (motion.current.frame) return;
-        let last = performance.now();
-        function tick(now: number) {
-            const state = motion.current;
-            const dt = Math.min(.032, Math.max(.001, (now - last) / 1000));
-            last = now;
-            const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-            const target = !reduced && drag.current?.moved
-                ? Math.max(-1, Math.min(1, sample.current.velocity / 1.3)) * Math.exp(-(now - sample.current.time) / 85) : 0;
-            state.speed += ((target - state.bend) * 260 - state.speed * 25) * dt;
-            state.bend += state.speed * dt;
-            if (reduced) { state.bend = 0; state.speed = 0; }
-            const bend = Math.max(-1, Math.min(1, state.bend));
-            lens.current?.style.setProperty('--liquid-bend', String(bend));
-            lens.current?.style.setProperty('--liquid-strain', String(Math.abs(bend) * .13));
-            if (Math.abs(state.bend) + Math.abs(state.speed) + Math.abs(target) < .002) {
-                lens.current?.style.setProperty('--liquid-bend', '0');
-                lens.current?.style.setProperty('--liquid-strain', '0');
-                state.bend = 0; state.speed = 0; state.frame = 0;
-            } else state.frame = requestAnimationFrame(tick);
-        }
-        motion.current.frame = requestAnimationFrame(tick);
-    }
     function cancel() {
         const current = drag.current;
         drag.current = null;
-        setDragging(false); setPressed(false); restore(); relax();
+        setDragging(false); setPressed(false); restore(); motion.release(true);
         if (current && root.current?.hasPointerCapture(current.id)) root.current.releasePointerCapture(current.id);
     }
-    useEffect(() => () => cancelAnimationFrame(motion.current.frame), []);
 
     useLayoutEffect(() => {
         function measure() {
@@ -78,7 +53,8 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
         let entry = requestAnimationFrame(() => { entry = requestAnimationFrame(() => { node.dataset.positioned = 'true'; }); });
         return () => { observer.disconnect(); cancelAnimationFrame(entry); delete node.dataset.positioned; };
     }, [items.length]);
-    useLayoutEffect(() => { cancel(); }, [value, disabled]);
+    useLayoutEffect(() => { if (drag.current) cancel(); else restore(); }, [value]);
+    useLayoutEffect(() => { if (disabled) { cancel(); motion.reset(); } }, [disabled]);
 
     function available(index: number) {
         return !!buttons.current[index] && !buttons.current[index]!.matches(':disabled');
@@ -111,13 +87,14 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
         const rect = current.origin;
         const first = rects.current.find((_, i) => available(i))!;
         const last = rects.current.filter((_, i) => available(i)).at(-1)!;
-        const left = Math.max(first.left, Math.min(last.left + last.width - rect.width, rect.left + dx));
+        const wanted = rect.left + dx;
+        const left = Math.max(first.left, Math.min(last.left + last.width - rect.width, wanted));
         setPreview(index);
         setVisual({ ...rect, left });
         const now = performance.now();
         const velocity = sample.current.time ? (x - sample.current.x) / Math.max(8, now - sample.current.time) : 0;
         sample.current = { x, time: now, velocity: sample.current.velocity * .35 + velocity * .65 };
-        relax();
+        motion.move(sample.current.velocity, Math.abs(wanted - left) / 40);
         if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
             node.style.setProperty('--glass-light-x', `${Math.max(0, Math.min(rect.width, x - left))}px`);
         }
@@ -127,7 +104,7 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
         const current = drag.current;
         if (!current || current.id !== event.pointerId) return;
         drag.current = null;
-        setDragging(false); setPressed(false); setPreview(-1); relax();
+        setDragging(false); setPressed(false); setPreview(-1); motion.release(cancelled);
         if (root.current?.hasPointerCapture(event.pointerId)) root.current.releasePointerCapture(event.pointerId);
         const rect = rects.current[cancelled ? selected : current.index];
         if (rect) setVisual(rect);
@@ -146,6 +123,7 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
             drag.current = { id: event.pointerId, index, startX: event.clientX, startY: event.clientY, origin: rects.current[index], moved: false };
             sample.current = { x, time: performance.now(), velocity: 0 };
             setPressed(true); setPreview(index); setVisual(rects.current[index]);
+            motion.press();
         }} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)}
         onLostPointerCapture={event => { if (drag.current) finish(event, true); }}
         onKeyDown={event => {
@@ -161,19 +139,19 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
             const cursor = enabled.indexOf(index);
             const next = event.key === 'Home' ? enabled[0] : event.key === 'End' ? enabled.at(-1)!
                 : enabled[(cursor + (event.key === 'ArrowRight' ? 1 : enabled.length - 1)) % enabled.length];
-            if (next !== undefined) { buttons.current[next]?.focus(); if (items[next].value !== value) onChange(items[next].value); }
+            if (next !== undefined) { buttons.current[next]?.focus(); motion.pulse(); if (items[next].value !== value) onChange(items[next].value); }
         }}>
         <div aria-hidden="true" className="liquid-anchor" style={{
             width: visual.width, height: visual.height,
             '--liquid-x': `${visual.left}px`, '--liquid-y': `${visual.top}px`,
             '--lens-radius': `${visual.height / 2}px`,
         } as CSSProperties}>
-            <GlassSurface as="div" surfaceRef={lens} className="liquid-indicator" />
+            <GlassSurface as="div" surfaceRef={lens} className="liquid-indicator liquid-elastic-lens"><span className="liquid-raised-optics" /></GlassSurface>
         </div>
         {items.map((item, index) => <button type="button" key={item.value} ref={button => { buttons.current[index] = button; }}
             disabled={disabled || item.disabled} aria-pressed={item.value === value}
             className={`${item.value === value ? 'selected' : ''} ${index === preview ? 'is-preview' : ''}`}
-            onClick={event => { if (event.detail === 0 && item.value !== value) onChange(item.value); }}>
+            onClick={event => { if (event.detail === 0) { motion.pulse(); if (item.value !== value) onChange(item.value); } }}>
             {item.label}
         </button>)}
     </div>;

@@ -14,10 +14,12 @@ raster resolution, signed displacement normalization, a named SVG map result,
 size caching, explicit cleanup and a frosted fallback for large touch surfaces
 or unsupported engines. Small moving control lenses keep their bounded raster
 and refraction on supported touch Chromium. Small lenses use the rounded SDF's
-edge normal with a narrow, low-blur rim; the flat centre stays transparent.
+edge normal with a low-blur rim; elastic controls add a small central
+magnification while preserving a transparent interior.
 Segment labels paint below the shared lens so its backdrop includes actual
 text detail, while panel text and form inputs stay outside their optical layers.
-CSS provides press/rebound and light effects. Shared typography and control metrics
+`useLiquidLens` supplies the shared analytic damped springs; CSS paints the shape
+and light without moving the selection anchor. Shared typography and control metrics
 use 14px body / 42px primary controls on desktop and 16px / 48px on touch.
 Responsive layouts prioritize connection and device actions without page scaling.
 
@@ -28,6 +30,19 @@ directly; a drag retains its grab offset. An outer anchor owns monotonic positio
 snapping and an inner lens owns lift, velocity-driven asymmetric droplet radii,
 area-preserving stretch, shear and damped shape recovery. The resting-size SDF
 bitmap is reused throughout dragging; shape updates only touch local CSS variables.
+Small elastic lenses prepare normal and raised filters sharing that bitmap at
+initialization/resize, with bounded raster resolution sized for enlargement.
+The local layers crossfade with lift, so the raised filter does not repeatedly
+bend a fully painted resting lens. No SVG attributes or maps change per gesture
+frame. A short press retains its raised target for 125ms even after commit, then
+settles through the same spring as a long press. Press uses lower damping, while
+release uses near-critical resistance for lift and stronger resistance for bend,
+preventing visible undershoot without resetting material position or velocity.
+Regrabs preserve spring velocity;
+shape recovery is independent of one-time value commits and position snapping.
+Segmented lenses use .24/.38 width/height lift gains, compact log controls use
+.18/.32, and switch thumbs use .34/.42, all with bounded overrun. Disabled state,
+reduced motion, unmount and cancellation terminate or settle the local material.
 The anchor takes its final size directly, avoiding per-frame map regeneration
 during width transitions. Initial layout appears in place before travel is enabled.
 Hover does not move
@@ -39,7 +54,9 @@ overlay when reopening during exit.
 These controls use the existing engine and CSS; no animation dependency is added.
 
 `LiquidToggle` retains a native labelled checkbox (switch role for boolean
-settings), with pointer capture and a single commit on release. Confirmation
+settings), with pointer capture and a single commit on release. A separate
+position anchor leaves the thumb free to use the same lift/droplet springs as
+segmented controls, including keyboard pulses and touch cancellation. Confirmation
 checkboxes keep checkbox semantics. `LiquidDisclosure` animates grid height while
 keeping collapsed fields inert and preserving their values. Menus settle their
 constrained width and position before attaching optics. Their readiness callback

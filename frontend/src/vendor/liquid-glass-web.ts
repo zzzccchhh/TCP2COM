@@ -32,6 +32,7 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.classList.add('liquid-glass-defs');
     const control = element.matches('.liquid-indicator, .liquid-toggle-thumb, .liquid-check-mark');
+    const elastic = element.classList.contains('liquid-elastic-lens');
     svg.dataset.glassKind = control ? 'control' : 'surface';
     svg.setAttribute('width', '0');
     svg.setAttribute('height', '0');
@@ -54,6 +55,9 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
     displacement.setAttribute('yChannelSelector', 'G');
     filter.append(image, displacement);
     defs.append(filter);
+    // Both optical states are prepared once. Touch/shape frames only crossfade local layers.
+    const raised = elastic ? filter.cloneNode(true) as SVGFilterElement : null;
+    if (raised) { raised.id = `${id}-raised`; defs.append(raised); }
     svg.append(defs);
     const canvas = document.createElement('canvas');
     const context = supported ? canvas.getContext('2d') : null;
@@ -69,6 +73,7 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
         revision++;
         svg.remove();
         element.style.removeProperty('--glass-refraction');
+        element.style.removeProperty('--glass-refraction-raised');
         element.dataset.glass = 'frosted';
         lastSize = '';
     }
@@ -84,13 +89,13 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
         const height = element.offsetHeight;
         if (width < 2 || height < 2) { reset(); return; }
         // The moving capsule deforms locally; its optical map is allocated only for its resting size.
-        const radius = element.parentElement?.classList.contains('liquid-anchor') ? Math.min(width, height) / 2
+        const radius = elastic ? Math.min(width, height) / 2
             : Math.min(parseFloat(getComputedStyle(element).borderTopLeftRadius) || 20, width / 2, height / 2);
         const key = `${width}:${height}:${radius}`;
         if (key === lastSize) return;
         try {
             // Bound CPU and memory cost even on large/high-DPI panels. The filter stays in CSS pixels.
-            const ratio = Math.min(1, 224 / Math.max(width, height));
+            const ratio = Math.min(elastic ? 1.55 : 1, 224 / Math.max(width, height));
             const w = Math.max(2, Math.round(width * ratio));
             const h = Math.max(2, Math.round(height * ratio));
             canvas.width = w;
@@ -110,10 +115,11 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
                     - roundedRectSDF(x - .5, y, width / 2, height / 2, radius) : x;
                 const ny = control ? roundedRectSDF(x, y + .5, width / 2, height / 2, radius)
                     - roundedRectSDF(x, y - .5, width / 2, height / 2, radius) : y;
-                const strength = control ? Math.min(6, height * .16) : 7;
+                const strength = elastic ? Math.min(8, height * .19) : control ? Math.min(6, height * .16) : 7;
                 const bend = smoothStep(0, 1, field) * strength / Math.max(.001, Math.hypot(nx, ny));
-                const dx = -nx * bend;
-                const dy = -ny * bend;
+                const centre = elastic ? (1 - smoothStep(-edge * 1.8, -edge * .3, distance)) * .025 : 0;
+                const dx = -nx * bend - x * centre;
+                const dy = -ny * bend - y * centre;
                 raw[i * 2] = dx;
                 raw[i * 2 + 1] = dy;
                 extent = Math.max(extent, Math.abs(dx), Math.abs(dy));
@@ -134,6 +140,14 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
             const map = canvas.toDataURL();
             image.setAttribute('href', map);
             displacement.setAttribute('scale', String(extent * 2));
+            if (raised) {
+                raised.setAttribute('width', String(width)); raised.setAttribute('height', String(height));
+                raised.querySelector('feImage')!.setAttribute('width', String(width));
+                raised.querySelector('feImage')!.setAttribute('height', String(height));
+                raised.querySelector('feImage')!.setAttribute('href', map);
+                raised.querySelector('feDisplacementMap')!.setAttribute('scale', String(extent * 3.1));
+                element.style.setProperty('--glass-refraction-raised', `url("#${id}-raised") blur(.08px) saturate(1.4)`);
+            }
             if (!svg.isConnected) document.body.append(svg);
             element.style.setProperty('--glass-refraction', `url("#${id}") blur(${control ? .15 : 12}px) saturate(1.35)`);
             element.dataset.glass = 'refractive';

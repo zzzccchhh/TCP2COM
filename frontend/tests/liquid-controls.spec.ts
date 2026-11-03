@@ -34,7 +34,8 @@ test('mouse lens follows the drag and commits exactly once on release', async ({
 test('hover leaves the lens in place and cancelled drags restore the selected option', async ({ page }) => {
     await ready(page);
     const group = page.getByRole('group', { name: '电脑网络角色' });
-    const lens = group.locator('.liquid-indicator');
+    // Selection position is independent of the lens's continuing shape rebound.
+    const lens = group.locator('.liquid-anchor');
     const width = await group.getByRole('button', { name: 'TCP 服务端', exact: true }).evaluate(element => element.offsetWidth);
     await expect(lens).toHaveCSS('width', `${width}px`);
     await lens.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));

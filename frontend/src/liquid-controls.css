@@ -32,24 +32,31 @@
     content: ''; position: absolute; inset: 1px; border-radius: inherit; pointer-events: none;
     border: 1px solid transparent; border-top-color: var(--highlight-strong); border-bottom-color: var(--edge-bottom);
 }
-.liquid-segments[data-dragging] .liquid-indicator { transition: width .08s linear, height .08s linear; box-shadow: 0 4px 14px var(--lens-shadow-strong), 0 0 12px var(--highlight); }
-/* Position snaps independently; only the lens contour and its light relax after release.
-   Opposite radii form a round leading droplet and a tapered trailing edge. */
-.liquid-anchor > .liquid-indicator {
-    width: 100%; height: 100%;
-    border-radius: calc(var(--lens-radius) * (1 - var(--liquid-bend, 0) * .4)) calc(var(--lens-radius) * (1 + var(--liquid-bend, 0) * .4)) calc(var(--lens-radius) * (1 + var(--liquid-bend, 0) * .24)) calc(var(--lens-radius) * (1 - var(--liquid-bend, 0) * .24)) / calc(50% - var(--liquid-bend, 0) * 12%) calc(50% + var(--liquid-bend, 0) * 12%) calc(50% - var(--liquid-bend, 0) * 8%) calc(50% + var(--liquid-bend, 0) * 8%);
-    transform: scale(calc(1 + var(--liquid-strain, 0)), calc(1 / (1 + var(--liquid-strain, 0)))) skewX(calc(var(--liquid-bend, 0) * -5deg));
-    transition: box-shadow .24s ease, background .24s ease, scale .24s cubic-bezier(.22, 1, .36, 1);
+/* The anchor owns selection travel; the material has its own continuous spring. */
+.liquid-segments:has([data-lens-active]) { z-index: 3; }
+.liquid-elastic-lens {
+    --lens-width-gain: .24;
+    --lens-height-gain: .38;
+    transform: scale(clamp(.9, calc(1 + var(--liquid-lift, 0) * var(--lens-width-gain) + var(--liquid-strain, 0)), 1.45), clamp(.88, calc((1 + var(--liquid-lift, 0) * var(--lens-height-gain)) / (1 + var(--liquid-strain, 0))), 1.56)) skewX(calc(var(--liquid-bend, 0) * -7deg));
+    transform-origin: center;
+    border-radius: calc(var(--lens-radius) * (1 - var(--liquid-bend, 0) * .5)) calc(var(--lens-radius) * (1 + var(--liquid-bend, 0) * .5)) calc(var(--lens-radius) * (1 + var(--liquid-bend, 0) * .3)) calc(var(--lens-radius) * (1 - var(--liquid-bend, 0) * .3)) / calc(50% - var(--liquid-bend, 0) * 16%) calc(50% + var(--liquid-bend, 0) * 16%) calc(50% - var(--liquid-bend, 0) * 10%) calc(50% + var(--liquid-bend, 0) * 10%);
+    box-shadow: 0 calc(3px + var(--liquid-thickness, 0) * 6px) calc(9px + var(--liquid-thickness, 0) * 12px) var(--lens-shadow-strong), 0 0 calc(10px + var(--liquid-thickness, 0) * 12px) var(--glow), inset 0 1px 1px var(--highlight-strong), inset 0 -1px 2px var(--edge-bottom);
+    transition: none;
 }
-.liquid-anchor > .liquid-indicator::before {
+.liquid-anchor > .liquid-elastic-lens { width: 100%; height: 100%; }
+.liquid-elastic-lens::before {
+    opacity: calc(1 - var(--liquid-thickness, 0));
     background: radial-gradient(ellipse at var(--glass-light-x, 35%) 0%, var(--lens-light), transparent 48%), linear-gradient(165deg, var(--lens-top), transparent 50%, var(--lens-bottom));
 }
-.liquid-segments[data-pressed] .liquid-anchor > .liquid-indicator {
-    scale: 1.035 1.06;
-    box-shadow: 0 7px 18px var(--lens-shadow-strong), 0 2px 4px var(--lens-shadow), 0 0 20px var(--glow-active), inset 0 1px 1px var(--highlight-strong), inset 0 -1px 2px var(--edge-bottom);
-    background: transparent;
+.liquid-raised-optics {
+    position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+    opacity: var(--liquid-thickness, 0);
+    background: linear-gradient(180deg, var(--highlight), transparent 12%, transparent 85%, var(--lens-bottom));
+    -webkit-backdrop-filter: var(--glass-refraction-raised, blur(.6px) saturate(1.25));
+    backdrop-filter: var(--glass-refraction-raised, blur(.6px) saturate(1.25));
+    box-shadow: inset 0 1px 1px var(--highlight-strong), inset 0 -1px 2px var(--edge-bottom);
 }
-.liquid-segments[data-pressed] .liquid-anchor > .liquid-indicator::after { border-top-color: var(--highlight-strong); border-bottom-color: var(--edge-bottom); }
+.log-filter .liquid-elastic-lens { --lens-width-gain: .18; --lens-height-gain: .32; }
 /* Paint labels before the lens: its backdrop now contains detail that can visibly refract. */
 .liquid-segments > button { position: relative; z-index: 0; touch-action: pan-y; }
 .liquid-segments { border-radius: 999px; background: linear-gradient(180deg, var(--track-top), var(--track-bottom)); box-shadow: inset 0 1px 3px var(--track-shadow), 0 1px 0 var(--highlight); }
@@ -145,9 +152,10 @@
 .toggle-state-on, .toggle-state-off { position: absolute; top: 11px; pointer-events: none; }
 .toggle-state-on { left: 11px; width: 2px; height: 8px; background: var(--highlight-strong); border-radius: 1px; }
 .toggle-state-off { right: 10px; width: 8px; height: 8px; border: 1px solid var(--highlight); border-radius: 50%; }
-.liquid-toggle-thumb { display: block; position: absolute; z-index: 1; top: 2px; left: 2px; width: 26px; height: 26px; border-radius: 999px; border: 1px solid var(--highlight-strong); transform: translateX(calc(var(--toggle-progress) * 20px)); box-shadow: 0 2px 5px var(--lens-shadow-strong), inset 0 1px 0 var(--highlight-strong); transition: transform .38s cubic-bezier(.2, 1.35, .35, 1); }
+.liquid-toggle-anchor { position: absolute; z-index: 1; top: 2px; left: 2px; width: calc(var(--toggle-height) - 4px); height: calc(var(--toggle-height) - 4px); transform: translateX(calc(var(--toggle-progress) * (var(--toggle-width) - var(--toggle-height)))); transition: transform .24s cubic-bezier(.22, 1, .36, 1); pointer-events: none; }
+.liquid-toggle[data-dragging] .liquid-toggle-anchor { transition: none; }
+.liquid-toggle-thumb { display: block; position: absolute; inset: 0; width: 100%; height: 100%; --lens-radius: calc((var(--toggle-height) - 4px) / 2); --lens-width-gain: .34; --lens-height-gain: .42; border: 1px solid var(--highlight-strong); }
 .liquid-toggle-thumb::before { background: linear-gradient(160deg, var(--lens-light), var(--lens-bottom) 55%, var(--highlight)); backdrop-filter: var(--glass-refraction, blur(3px) saturate(1.35)); }
-.liquid-toggle[data-dragging] .liquid-toggle-thumb { transform: translateX(calc(var(--toggle-progress) * 20px)) scale(1.12, .94); transition: transform .06s linear; }
 .toggle-label { flex: 1; }
 .liquid-toggle:has(input:focus-visible) .liquid-toggle-track, .liquid-toggle:has(input:focus-visible) .liquid-check-mark { outline: 2px solid var(--accent); outline-offset: 3px; }
 .liquid-toggle:has(input:disabled) { cursor: not-allowed; opacity: .5; }
@@ -184,8 +192,9 @@
 @media (prefers-reduced-motion: reduce) {
     .liquid-segments[data-positioned] .liquid-anchor, .liquid-indicator { transition: none; }
     .liquid-indicator { transform: translate3d(var(--liquid-x, 0px), var(--liquid-y, 0px), 0); }
-    .liquid-anchor > .liquid-indicator { transform: none; scale: none; border-radius: 999px; }
-    .liquid-toggle[data-dragging] .liquid-toggle-thumb { transform: translateX(calc(var(--toggle-progress) * 20px)); }
+    .liquid-elastic-lens { transform: none; border-radius: 999px; }
+    .liquid-raised-optics { display: none; }
+    .liquid-toggle-anchor { transition: none; }
     .liquid-toggle.confirmation:active .liquid-check-mark { scale: none; }
     .picker-position, .picker-window, .picker-window::before, .picker-content, .liquid-overlay, .overlay-shade, .liquid-overlay > .drawer,
     .liquid-overlay > .confirm-dialog, .liquid-popover, .liquid-popover::before, .popover-content, .liquid-toggle-track, .liquid-toggle-thumb, .liquid-check-mark,
@@ -196,5 +205,5 @@
     .liquid-segments > button.selected, .picker-list > button.is-active { color: HighlightText; }
     .picker-window { background: Canvas; border: 1px solid CanvasText; }
     .liquid-toggle > input { position: static; width: 18px; height: 18px; opacity: 1; }
-    .liquid-toggle-track, .liquid-check-mark { display: none; }
+    .liquid-toggle-track, .liquid-check-mark, .liquid-raised-optics { display: none; }
 }

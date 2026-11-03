@@ -86,7 +86,10 @@ test('the moving lens visibly refracts the actual track labels', async ({ page }
     await expect(lens).toHaveAttribute('data-glass', 'refractive');
     await page.evaluate(() => document.fonts.ready);
     const refracted = await group.screenshot({ path: 'test-results/liquid-lens-refraction.png' });
-    await lens.evaluate(element => (element as HTMLElement).style.setProperty('--glass-refraction', 'blur(.15px) saturate(1.35)'));
+    await lens.evaluate(element => {
+        (element as HTMLElement).style.setProperty('--glass-refraction', 'blur(.15px) saturate(1.35)');
+        (element as HTMLElement).style.setProperty('--glass-refraction-raised', 'blur(.08px) saturate(1.4)');
+    });
     const plain = await group.screenshot({ path: 'test-results/liquid-lens-without-refraction.png' });
     const changed = await page.evaluate(async ([first, second]) => {
         async function pixels(base64: string) {
