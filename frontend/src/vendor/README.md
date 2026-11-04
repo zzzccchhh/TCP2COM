@@ -28,11 +28,11 @@ press, separate click candidates (5px mouse / 8px touch threshold), local drag
 previews and a single change on release. A click targets the option rectangle
 directly; a drag retains its grab offset. An outer anchor owns monotonic position
 snapping and an inner lens owns lift, velocity-driven asymmetric droplet radii,
-area-preserving stretch, shear and damped shape recovery. The resting-size SDF
+bounded stretch/compression, shear and damped shape recovery. The resting-size SDF
 bitmap is reused throughout dragging; shape updates only touch local CSS variables.
-Small elastic lenses prepare normal and raised filters sharing that bitmap at
+Small elastic lenses prepare normal, raised and flowing filters sharing that bitmap at
 initialization/resize, with bounded raster resolution sized for enlargement.
-The local layers crossfade with lift, so the raised filter does not repeatedly
+Resting elastic glass uses no displacement. Active local layers crossfade with lift and flow, so the raised filter does not repeatedly
 bend a fully painted resting lens. No SVG attributes or maps change per gesture
 frame. A short press retains its raised target for 125ms even after commit, then
 settles through the same spring as a long press. Press uses lower damping, while
@@ -120,3 +120,18 @@ visualViewport events size the child to keyboard/rotation changes, safe-area
 padding protects its header/footer, and exit restores scroll and entry focus.
 Reduced motion disables travel and releases an exiting page immediately. Wider
 layouts and reset/help overlays keep their original presentation.
+
+Elastic controls now keep idle labels free of displacement: the static tint has
+no backdrop filter, while held and flowing optical layers fade with lift/strain.
+A third prepared flow filter shares the same SDF bitmap and adds stronger lensing
+without per-frame SVG edits. Velocity, short material lag and bounded edge pressure
+drive asymmetric rear radii, stretch/compression and directional highlights;
+strain recedes with lift on release to avoid a below-resting-size squash. Click and
+keyboard travel use a short directional impulse without changing selection anchors.
+`useToggleProgress` supplies one bounded numeric progress for thumb translation and
+track tint opacity. Drag previews paint immediately; 240ms easing handles commits,
+reversals and cancellation from the current visual position. Reconnect uses green
+in both appearances with a neutral off track; other switches retain theme colours.
+Reduced motion finishes progress immediately and hidden/disabled controls retain
+native semantics. The implementation approximates the dynamic principles in
+[Apple's Liquid Glass introduction](https://developer.apple.com/videos/play/wwdc2025/219/).

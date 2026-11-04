@@ -59,6 +59,10 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
     function available(index: number) {
         return !!buttons.current[index] && !buttons.current[index]!.matches(':disabled');
     }
+    function travel(index: number) {
+        const from = rects.current[selectedRef.current], to = rects.current[index];
+        return from && to ? to.left + to.width / 2 - from.left - from.width / 2 : 0;
+    }
     function nearest(x: number) {
         let index = -1, distance = Infinity;
         rects.current.forEach((rect, i) => {
@@ -93,8 +97,9 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
         setVisual({ ...rect, left });
         const now = performance.now();
         const velocity = sample.current.time ? (x - sample.current.x) / Math.max(8, now - sample.current.time) : 0;
+        const distance = x - sample.current.x;
         sample.current = { x, time: now, velocity: sample.current.velocity * .35 + velocity * .65 };
-        motion.move(sample.current.velocity, Math.abs(wanted - left) / 40);
+        motion.move(sample.current.velocity, Math.abs(wanted - left) / 40, distance);
         if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
             node.style.setProperty('--glass-light-x', `${Math.max(0, Math.min(rect.width, x - left))}px`);
         }
@@ -124,6 +129,7 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
             sample.current = { x, time: performance.now(), velocity: 0 };
             setPressed(true); setPreview(index); setVisual(rects.current[index]);
             motion.press();
+            motion.travel(travel(index));
         }} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)}
         onLostPointerCapture={event => { if (drag.current) finish(event, true); }}
         onKeyDown={event => {
@@ -139,19 +145,19 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
             const cursor = enabled.indexOf(index);
             const next = event.key === 'Home' ? enabled[0] : event.key === 'End' ? enabled.at(-1)!
                 : enabled[(cursor + (event.key === 'ArrowRight' ? 1 : enabled.length - 1)) % enabled.length];
-            if (next !== undefined) { buttons.current[next]?.focus(); motion.pulse(); if (items[next].value !== value) onChange(items[next].value); }
+            if (next !== undefined) { buttons.current[next]?.focus(); motion.pulse(travel(next)); if (items[next].value !== value) onChange(items[next].value); }
         }}>
         <div aria-hidden="true" className="liquid-anchor" style={{
             width: visual.width, height: visual.height,
             '--liquid-x': `${visual.left}px`, '--liquid-y': `${visual.top}px`,
             '--lens-radius': `${visual.height / 2}px`,
         } as CSSProperties}>
-            <GlassSurface as="div" surfaceRef={lens} className="liquid-indicator liquid-elastic-lens"><span className="liquid-raised-optics" /></GlassSurface>
+            <GlassSurface as="div" surfaceRef={lens} className="liquid-indicator liquid-elastic-lens"><span className="liquid-raised-optics" /><span className="liquid-flow-optics" /></GlassSurface>
         </div>
         {items.map((item, index) => <button type="button" key={item.value} ref={button => { buttons.current[index] = button; }}
             disabled={disabled || item.disabled} aria-pressed={item.value === value}
             className={`${item.value === value ? 'selected' : ''} ${index === preview ? 'is-preview' : ''}`}
-            onClick={event => { if (event.detail === 0) { motion.pulse(); if (item.value !== value) onChange(item.value); } }}>
+            onClick={event => { if (event.detail === 0) { motion.pulse(travel(index)); if (item.value !== value) onChange(item.value); } }}>
             {item.label}
         </button>)}
     </div>;

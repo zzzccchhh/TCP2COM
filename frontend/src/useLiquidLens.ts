@@ -19,22 +19,32 @@ export function useLiquidLens(element: RefObject<HTMLElement | null>) {
     const motion = useMemo(() => {
         const reduced = matchMedia('(prefers-reduced-motion: reduce)');
         const lift: Spring = { value: 0, velocity: 0 }, bend: Spring = { value: 0, velocity: 0 };
-        let held = false, peakUntil = 0, inputTime = 0, inputVelocity = 0, edge = 0, frame = 0, last = 0;
+        const edge: Spring = { value: 0, velocity: 0 };
+        let held = false, peakUntil = 0, travelUntil = 0, inputTime = 0, inputVelocity = 0, pressure = 0, pull = 0, frame = 0, last = 0;
 
         function paint() {
             const node = element.current;
             if (!node) return;
+            const material = clamp(lift.value, 0, 1);
+            const direction = clamp(bend.value, -1.15, 1.15) * material;
             node.style.setProperty('--liquid-lift', String(clamp(lift.value, -.22, 1.34)));
-            node.style.setProperty('--liquid-bend', String(clamp(bend.value, -1.15, 1.15)));
-            node.style.setProperty('--liquid-strain', String(Math.min(.22, Math.abs(bend.value) * .19 + edge * .06)));
+            node.style.setProperty('--liquid-bend', String(direction));
+            // Let drag strain recede with lift, so release cannot squash below the resting size.
+            const flow = Math.min(1, Math.pow(Math.abs(bend.value), .65)) * material;
+            node.style.setProperty('--liquid-flow', String(flow));
+            node.style.setProperty('--liquid-strain', String(flow * .26));
+            node.style.setProperty('--liquid-edge', String(clamp(edge.value, 0, 1) * material));
+            node.style.setProperty('--liquid-tail-left', String(1 + Math.max(0, direction) * .95 - Math.max(0, -direction) * .12));
+            node.style.setProperty('--liquid-tail-right', String(1 + Math.max(0, -direction) * .95 - Math.max(0, direction) * .12));
             node.style.setProperty('--liquid-thickness', String(clamp(lift.value, 0, 1)));
-            if (held || Math.abs(lift.value) + Math.abs(bend.value) > .002) node.dataset.lensActive = 'true';
+            if (held || Math.abs(lift.value) + Math.abs(lift.velocity) + Math.abs(bend.value) + Math.abs(bend.velocity)
+                + Math.abs(edge.value) + Math.abs(edge.velocity) > .004) node.dataset.lensActive = 'true';
             else delete node.dataset.lensActive;
         }
         function reset() {
             cancelAnimationFrame(frame); frame = 0;
-            held = false; peakUntil = 0; inputVelocity = 0; edge = 0;
-            lift.value = lift.velocity = bend.value = bend.velocity = 0;
+            held = false; peakUntil = travelUntil = 0; inputVelocity = pressure = pull = 0;
+            lift.value = lift.velocity = bend.value = bend.velocity = edge.value = edge.velocity = 0;
             paint();
         }
         function tick(now: number) {
@@ -44,14 +54,19 @@ export function useLiquidLens(element: RefObject<HTMLElement | null>) {
             if (now - last > 250 && !held) { reset(); return; }
             const dt = Math.min(.1, Math.max(.001, (now - last) / 1000)); last = now;
             const target = held || now < peakUntil ? 1 : 0;
-            const age = Math.exp(-(now - inputTime) / 85);
-            const bendTarget = held ? clamp(inputVelocity / 1.1, -1, 1) * age : 0;
+            const age = Math.exp(-Math.max(0, now - inputTime - 35) / 150);
+            const height = element.current?.offsetHeight || 42;
+            const drive = Math.tanh(inputVelocity / Math.max(.2, height / 90)) * .85 + pull / (height * .65) * .4;
+            const bendTarget = (held || now < travelUntil) && Math.abs(drive) > .002
+                ? Math.sign(drive) * Math.min(1, .18 + Math.abs(drive) * .82) * age : 0;
             // Keep the lively press, then settle close to critical damping on release.
             // Preserve position/velocity; changing the resistance avoids a visible snap.
             advance(lift, target, dt, 850, target ? 22 : 52);
-            advance(bend, bendTarget, dt, 360, held ? 16 : 32);
-            if (!held) edge *= Math.exp(-dt * 18);
-            const energy = Math.abs(lift.value - target) + Math.abs(lift.velocity) + Math.abs(bend.value) + Math.abs(bend.velocity) + Math.abs(bendTarget) + edge;
+            advance(bend, bendTarget, dt, 480, held ? 27 : 40);
+            advance(edge, held ? pressure : 0, dt, 650, 42);
+            pull *= Math.exp(-dt * 12);
+            const energy = Math.abs(lift.value - target) + Math.abs(lift.velocity) + Math.abs(bend.value) + Math.abs(bend.velocity)
+                + Math.abs(bendTarget) + Math.abs(edge.value - (held ? pressure : 0)) + Math.abs(edge.velocity);
             if (!held && !target && energy < .004) { reset(); return; }
             paint();
             // Held, settled lenses do not spend frames until the next pointer sample/release.
@@ -63,18 +78,28 @@ export function useLiquidLens(element: RefObject<HTMLElement | null>) {
         }
         function press() {
             held = true; peakUntil = performance.now() + 125;
-            inputVelocity = 0; edge = 0; wake();
+            travelUntil = 0; inputVelocity = pressure = pull = 0; wake();
         }
         function release(cancelled = false) {
             held = false;
-            if (cancelled) peakUntil = 0;
+            if (cancelled) peakUntil = travelUntil = 0;
             wake();
         }
+        function travel(distance: number) {
+            if (Math.abs(distance) < 1) return;
+            const height = element.current?.offsetHeight || 42;
+            inputTime = performance.now(); inputVelocity = distance / 280;
+            pull = clamp(distance * .15, -height * .65, height * .65);
+            travelUntil = inputTime + 180; wake();
+        }
         return {
-            press, release, reset,
-            pulse() { press(); release(); },
-            move(velocity: number, overscroll = 0) {
-                inputTime = performance.now(); inputVelocity = velocity; edge = clamp(overscroll, 0, 1); wake();
+            press, release, reset, travel,
+            pulse(distance = 0) { press(); travel(distance); release(); },
+            move(velocity: number, overscroll = 0, distance = 0) {
+                const height = element.current?.offsetHeight || 42;
+                inputTime = performance.now(); inputVelocity = velocity; pressure = clamp(overscroll, 0, 1);
+                // A small material lag strengthens slow drags without delaying the selection anchor.
+                pull = clamp(pull + distance * .45, -height * .65, height * .65); wake();
             },
             subscribe() { reduced.addEventListener('change', reset); return () => { reduced.removeEventListener('change', reset); reset(); }; },
         };

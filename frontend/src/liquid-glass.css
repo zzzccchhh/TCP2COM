@@ -57,6 +57,8 @@
     --neutral-border: #d9d8cc;
     --toggle-off: #86907966;
     --toggle-on: #56864b;
+    --reconnect-off: #85858540;
+    --reconnect-on: #34b95a;
     --toast-bg: #30372beb;
     --toast-ink: #f5f6ef;
     --log-debug: #646c92;
@@ -125,6 +127,8 @@
     --neutral-border: #51465c;
     --toggle-off: #57476999;
     --toggle-on: #9165cb;
+    --reconnect-off: #85858540;
+    --reconnect-on: #39cf65;
     --toast-bg: #dfccf7;
     --toast-ink: #20162e;
     --log-debug: #cdb3f4;

@@ -487,7 +487,7 @@ export default function App() {
                             {cf('tcp_port', 'TCP 服务端口', { numeric: true })}{cf('remote_ip', '设备目标 IP')}
                             {cf('remote_port', '设备目标端口', { numeric: true })}{cf('local_port', '设备本地端口（0 自动）', { numeric: true })}
                         </div></div>
-                        <div className="config-section"><h3>恢复与缓冲</h3><Toggle checked={!!config.auto_reconnect} disabled={waiting || (!!snap.baseline && !('auto_reconnect' in snap.baseline))} onChange={value => editConfig('auto_reconnect', value)}>设备自动重连</Toggle><div className="form-grid">
+                        <div className="config-section"><h3>恢复与缓冲</h3><Toggle tone="green" checked={!!config.auto_reconnect} disabled={waiting || (!!snap.baseline && !('auto_reconnect' in snap.baseline))} onChange={value => editConfig('auto_reconnect', value)}>设备自动重连</Toggle><div className="form-grid">
                             {cf('reconnect_ms', '重连间隔 / ms', { numeric: true })}{cf('connect_timeout_ms', '连接超时 / ms', { numeric: true })}
                             {cf('up_kb', '上行缓冲 / KiB', { numeric: true })}{cf('down_kb', '下行缓冲 / KiB', { numeric: true })}
                         </div><p className="muted small-copy">上行与下行缓冲总容量不超过 6144 KiB。</p></div>
