@@ -44,11 +44,11 @@ async function resume(page: Page) {
     await page.evaluate(() => document.getAnimations().forEach(animation => { if (animation.playState === 'paused') animation.play(); }));
 }
 
-for (const theme of ['light', 'dark']) for (const destination of ['config', 'diagnostics']) {
+for (const theme of ['light', 'dark']) for (const destination of ['config', 'diagnostics', 'reset']) {
     test(`${theme} phone pushes and returns from ${destination} as a full page`, async ({ browser }) => {
         const { page, context, video, directory } = await phone(browser, theme, destination === 'config');
         try {
-            const button = page.getByRole('button', { name: destination === 'config' ? '打开配置面板' : '诊断', exact: true });
+            const button = page.getByRole('button', { name: destination === 'config' ? '打开配置面板' : destination === 'reset' ? '打开远程复位' : '诊断', exact: true });
             await button.scrollIntoViewIfNeeded();
             const scroll = await page.evaluate(() => scrollY), url = page.url();
             const trigger = (await button.boundingBox())!;
@@ -62,13 +62,13 @@ for (const theme of ['light', 'dark']) for (const destination of ['config', 'dia
             await expect(page.locator('.mobile-page-layer')).toHaveCSS('backdrop-filter', 'none');
             await expect(page.locator('.primary-page')).toHaveAttribute('inert', '');
             await resume(page); await entered(page);
-            const pane = page.getByRole('region', { name: destination === 'config' ? '设备配置面板' : '链路诊断', exact: true });
+            const pane = page.getByRole('region', { name: destination === 'config' ? '设备配置面板' : destination === 'reset' ? '远程复位' : '链路诊断', exact: true });
             const box = (await pane.boundingBox())!;
             expect(box.x).toBe(0); expect(box.y).toBe(0); expect(box.width).toBe(390); expect(box.height).toBe(844);
             await page.screenshot({ path: `test-results/mobile-page-${theme}-${destination}.png` });
             expect(page.url()).toBe(url);
             expect(await page.evaluate(() => history.state.unrelated)).toBe('keep');
-            const calls = await page.evaluate(() => (window as any).__calls.filter((call: any[]) => ['read_device', 'save_device', 'usb'].includes(call[0])));
+            const calls = await page.evaluate(() => (window as any).__calls.filter((call: any[]) => ['read_device', 'save_device', 'usb', 'reset_click'].includes(call[0])));
             expect(calls).toHaveLength(0);
             await pane.getByRole('button', { name: '返回工作台', exact: true }).evaluate(button => (button as HTMLButtonElement).click());
             await expect(page.locator('.mobile-page-layer')).toHaveAttribute('data-state', 'closed');

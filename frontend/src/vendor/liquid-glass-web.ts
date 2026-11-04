@@ -58,8 +58,6 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
     // Optical states are prepared once. Touch/shape frames only crossfade local layers.
     const raised = elastic ? filter.cloneNode(true) as SVGFilterElement : null;
     if (raised) { raised.id = `${id}-raised`; defs.append(raised); }
-    const flow = elastic ? filter.cloneNode(true) as SVGFilterElement : null;
-    if (flow) { flow.id = `${id}-flow`; defs.append(flow); }
     svg.append(defs);
     const canvas = document.createElement('canvas');
     const context = supported ? canvas.getContext('2d') : null;
@@ -76,7 +74,6 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
         svg.remove();
         element.style.removeProperty('--glass-refraction');
         element.style.removeProperty('--glass-refraction-raised');
-        element.style.removeProperty('--glass-refraction-flow');
         element.dataset.glass = 'frosted';
         lastSize = '';
     }
@@ -121,9 +118,9 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
                     - roundedRectSDF(x - .5, y, width / 2, height / 2, radius) : x;
                 const ny = control ? roundedRectSDF(x, y + .5, width / 2, height / 2, radius)
                     - roundedRectSDF(x, y - .5, width / 2, height / 2, radius) : y;
-                const strength = elastic ? Math.min(8, height * .19) : control ? Math.min(6, height * .16) : 7;
+                const strength = elastic ? Math.min(6, height * .14) : control ? Math.min(6, height * .16) : 7;
                 const bend = smoothStep(0, 1, field) * strength / Math.max(.001, Math.hypot(nx, ny));
-                const centre = elastic ? (1 - smoothStep(-edge * 1.8, -edge * .3, distance)) * .025 : 0;
+                const centre = elastic ? (1 - smoothStep(-edge * 1.8, -edge * .3, distance)) * .04 : 0;
                 const dx = -nx * bend - x * centre;
                 const dy = -ny * bend - y * centre;
                 raw[i * 2] = dx;
@@ -151,16 +148,8 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
                 raised.querySelector('feImage')!.setAttribute('width', String(width));
                 raised.querySelector('feImage')!.setAttribute('height', String(height));
                 raised.querySelector('feImage')!.setAttribute('href', map);
-                raised.querySelector('feDisplacementMap')!.setAttribute('scale', String(extent * 3.1));
+                raised.querySelector('feDisplacementMap')!.setAttribute('scale', String(extent * 2.8));
                 element.style.setProperty('--glass-refraction-raised', `url("#${id}-raised") blur(.08px) saturate(1.4)`);
-            }
-            if (flow) {
-                flow.setAttribute('width', String(width)); flow.setAttribute('height', String(height));
-                flow.querySelector('feImage')!.setAttribute('width', String(width));
-                flow.querySelector('feImage')!.setAttribute('height', String(height));
-                flow.querySelector('feImage')!.setAttribute('href', map);
-                flow.querySelector('feDisplacementMap')!.setAttribute('scale', String(extent * 4));
-                element.style.setProperty('--glass-refraction-flow', `url("#${id}-flow") blur(.08px) saturate(1.4)`);
             }
             if (!svg.isConnected) document.body.append(svg);
             element.style.setProperty('--glass-refraction', `url("#${id}") blur(${control ? .15 : 12}px) saturate(1.35)`);

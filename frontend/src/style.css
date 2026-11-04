@@ -20,7 +20,7 @@ button { cursor: pointer; }
 button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .46; }
 button { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid #758572; outline-offset: 3px; }
-button, a, input, select { transition: background .15s, border-color .15s, color .15s; }
+button, a, input, select { transition: background var(--colour-duration, .15s), border-color var(--colour-duration, .15s), color var(--colour-duration, .15s); }
 button svg { flex-shrink: 0; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 h1, h2, h3, p { margin: 0; }

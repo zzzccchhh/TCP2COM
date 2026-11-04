@@ -82,7 +82,7 @@ export default function LiquidToggle({ checked, onChange, children, disabled = f
                 }} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)}
                 onLostPointerCapture={event => { if (gesture.current) finish(event, true); }}>
                 <span className="toggle-state-on" /><span className="toggle-state-off" />
-                <span className="liquid-toggle-anchor"><GlassSurface as="span" surfaceRef={lens} className="liquid-toggle-thumb liquid-elastic-lens"><span className="liquid-raised-optics" /><span className="liquid-flow-optics" /></GlassSurface></span>
+                <span className="liquid-toggle-anchor"><GlassSurface as="span" surfaceRef={lens} className="liquid-toggle-thumb liquid-elastic-lens"><span className="liquid-raised-optics" /><span className="liquid-lens-sheen" /></GlassSurface></span>
             </span>}
         <span className="toggle-label">{children}</span>
     </label>;

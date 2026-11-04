@@ -152,7 +152,7 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
             '--liquid-x': `${visual.left}px`, '--liquid-y': `${visual.top}px`,
             '--lens-radius': `${visual.height / 2}px`,
         } as CSSProperties}>
-            <GlassSurface as="div" surfaceRef={lens} className="liquid-indicator liquid-elastic-lens"><span className="liquid-raised-optics" /><span className="liquid-flow-optics" /></GlassSurface>
+            <GlassSurface as="div" surfaceRef={lens} className="liquid-indicator liquid-elastic-lens"><span className="liquid-raised-optics" /><span className="liquid-lens-sheen" /></GlassSurface>
         </div>
         {items.map((item, index) => <button type="button" key={item.value} ref={button => { buttons.current[index] = button; }}
             disabled={disabled || item.disabled} aria-pressed={item.value === value}

@@ -2,7 +2,7 @@
 .primary-page[data-navigation] { transform: translateX(0); transition: transform .32s cubic-bezier(.22, 1, .36, 1); }
 .primary-page[data-navigation="open"] { transform: translateX(-10vw); }
 .primary-page[data-navigation] .glass-surface::before { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
-.primary-page[data-navigation] .liquid-raised-optics, .primary-page[data-navigation] .liquid-flow-optics { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+.primary-page[data-navigation] .liquid-raised-optics, .primary-page[data-navigation] .liquid-lens-sheen { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 .app-shell[data-mobile-page] { overflow-x: clip; }
 .drawer-backdrop.mobile-page-layer { top: var(--page-top, 0px); bottom: auto; height: var(--page-height, 100dvh); background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; overflow: clip; }
 .mobile-page-layer > .overlay-shade { display: none; }

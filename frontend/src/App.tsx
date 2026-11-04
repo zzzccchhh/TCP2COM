@@ -102,6 +102,7 @@ export default function App() {
     }, [mobilePage, drawerMotion.finishExit]);
     const [resetHost, setResetHost] = useState('');
     const [resetPort, setResetPort] = useState('8081');
+    const resetDraftDevice = useRef<string | null>(null);
     const [samples, setSamples] = useState<number[][]>([]);
     const logBody = useRef<HTMLDivElement>(null);
     const importInput = useRef<HTMLInputElement>(null);
@@ -110,6 +111,11 @@ export default function App() {
     const lastEpoch = useRef(0);
     const mounted = useRef(false);
     const device = settings.device as string;
+    useEffect(() => {
+        if (!ready || drawer !== 'reset' || resetDraftDevice.current === device) return;
+        resetDraftDevice.current = device;
+        setResetHost(settings.host || ''); setResetPort('8081');
+    }, [ready, drawer, device, settings.host]);
     const caps = device !== 'esp01s';
 
     const notify = useCallback((message: string) => setToast(message), []);
@@ -443,7 +449,7 @@ export default function App() {
                     </> : <p className="setup-note">ESP-01S 保留透传和远程复位功能。</p>}
                 </GlassSurface>
 
-                <GlassSurface className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><button className="icon-button" title="打开远程复位" aria-label="打开远程复位" onClick={event => { setResetHost(settings.host || ''); setDrawer('reset', event.currentTarget); }}><ArrowUpRight size={18} /></button></GlassSurface>
+                <GlassSurface className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><button className="icon-button" title="打开远程复位" aria-label="打开远程复位" onClick={event => setDrawer('reset', event.currentTarget)}><ArrowUpRight size={18} /></button></GlassSurface>
             </aside>
         </main>
 

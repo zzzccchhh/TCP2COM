@@ -47,7 +47,8 @@ async function shape(lens: Locator) {
         const style = getComputedStyle(element), box = element.getBoundingClientRect();
         return { bend: Number(style.getPropertyValue('--liquid-bend')), flow: Number(style.getPropertyValue('--liquid-flow')),
             edge: Number(style.getPropertyValue('--liquid-edge')), width: box.width / (element as HTMLElement).offsetWidth,
-            height: box.height / (element as HTMLElement).offsetHeight };
+            height: box.height / (element as HTMLElement).offsetHeight, skew: new DOMMatrixReadOnly(style.transform).c,
+            roundness: parseFloat(style.borderTopLeftRadius) / parseFloat(style.borderTopRightRadius) };
     });
 }
 async function progress(track: Locator) {
@@ -60,16 +61,21 @@ async function progress(track: Locator) {
             colour: getComputedStyle(element, '::before').backgroundColor };
     });
 }
+async function materialShot(page: Page, locator: Locator, path: string) {
+    const box = (await locator.boundingBox())!, viewport = page.viewportSize()!;
+    const x = Math.max(0, box.x - 28), y = Math.max(0, box.y - 28);
+    await page.screenshot({ path, clip: { x, y, width: Math.min(viewport.width - x, box.width + 56), height: Math.min(viewport.height - y, box.height + 56) } });
+}
 
 for (const theme of ['light', 'dark']) for (const touch of [false, true]) {
     const name = `${theme} ${touch ? 'phone' : 'desktop'}`;
-    test(`${name} rests clear, refracts while held and forms a directional droplet`, async ({ browser }) => {
+    test(`${name} rests clear and moves as a rounded raised lens`, async ({ browser }) => {
         const { page, context, pointer, directory, video } = await ready(browser, theme, touch, true);
         try {
             const group = page.getByRole('group', { name: '电脑网络角色', exact: true });
             const lens = group.locator('.liquid-indicator');
             await expect(lens).toHaveAttribute('data-glass', 'refractive');
-            const styles = '.liquid-elastic-lens::before, .liquid-raised-optics, .liquid-flow-optics { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }';
+            const styles = '.liquid-elastic-lens::before, .liquid-raised-optics, .liquid-lens-sheen { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }';
             const rest = await group.screenshot();
             const suppression = await page.addStyleTag({ content: styles });
             expect(await changedPixels(page, rest, await group.screenshot())).toBeLessThan(3);
@@ -80,26 +86,31 @@ for (const theme of ['light', 'dark']) for (const touch of [false, true]) {
             await pointer.down(x, y); await page.waitForTimeout(450);
             await expect(lens).toHaveAttribute('data-lens-active', 'true');
             const held = await shape(lens);
+            await expect(lens.locator('.liquid-lens-sheen')).toHaveCSS('backdrop-filter', 'none');
             const refracted = await group.screenshot();
             const flat = await page.addStyleTag({ content: styles });
             expect(await changedPixels(page, refracted, await group.screenshot())).toBeGreaterThan(15);
             await flat.evaluate(element => element.remove());
             for (let step = 1; step <= 8; step++) { await pointer.move(x + step * 4, y); await page.waitForTimeout(32); }
             const slow = await shape(lens);
-            expect(slow.flow).toBeGreaterThan(.25); expect(slow.width / held.width).toBeGreaterThan(1.04);
-            await group.screenshot({ path: `test-results/flow-${theme}-${touch ? 'phone' : 'desktop'}-slow.png` });
+            expect(slow.flow).toBeGreaterThan(.01);
+            expect(slow.width / held.width).toBeGreaterThan(.98); expect(slow.width / held.width).toBeLessThan(1.06);
+            expect(slow.height / held.height).toBeGreaterThan(.98); expect(slow.skew).toBe(0);
+            expect(slow.roundness).toBeGreaterThan(.85); expect(slow.roundness).toBeLessThan(1.18);
+            await materialShot(page, group, `test-results/flow-${theme}-${touch ? 'phone' : 'desktop'}-slow.png`);
             for (let step = 1; step <= 5; step++) await pointer.move(x + 32 - step * 13, y);
-            await expect.poll(async () => (await shape(lens)).bend).toBeLessThan(-.2);
+            await expect.poll(async () => (await shape(lens)).bend).toBeLessThan(-.05);
             const fast = await shape(lens);
-            expect(fast.width / held.width).toBeGreaterThan(1.06);
-            await group.screenshot({ path: `test-results/flow-${theme}-${touch ? 'phone' : 'desktop'}-reverse.png` });
+            expect(fast.width / held.width).toBeLessThan(1.06); expect(fast.height / held.height).toBeGreaterThan(.98);
+            expect(fast.skew).toBe(0); expect(fast.roundness).toBeGreaterThan(.85); expect(fast.roundness).toBeLessThan(1.18);
+            await materialShot(page, group, `test-results/flow-${theme}-${touch ? 'phone' : 'desktop'}-reverse.png`);
             await page.waitForTimeout(650);
             expect((await shape(lens)).flow).toBeLessThan(.2);
             await expect(lens).toHaveAttribute('data-lens-active', 'true');
             const bounds = (await group.boundingBox())!;
             await pointer.move(bounds.x + bounds.width + 70, y);
             await expect.poll(async () => (await shape(lens)).edge).toBeGreaterThan(.7);
-            await group.screenshot({ path: `test-results/flow-${theme}-${touch ? 'phone' : 'desktop'}-edge.png` });
+            await materialShot(page, group, `test-results/flow-${theme}-${touch ? 'phone' : 'desktop'}-edge.png`);
             expect(await page.locator('.liquid-glass-defs').evaluateAll(elements => elements.map(element => element.outerHTML))).toEqual(definitions);
             await pointer.cancel();
             await expect(lens).not.toHaveAttribute('data-lens-active', 'true');
@@ -128,6 +139,8 @@ for (const theme of ['light', 'dark']) for (const touch of [false, true]) {
             const colour = (await progress(track)).colour.match(/[\d.]+/g)!.map(Number);
             expect(colour[1]).toBeGreaterThan(colour[0] + 50); expect(colour[1]).toBeGreaterThan(colour[2] + 50);
             await pointer.down(x, y);
+            await page.waitForTimeout(450);
+            await materialShot(page, track, `test-results/rounded-switch-${theme}-${touch ? 'phone' : 'desktop'}.png`);
             for (const p of [.75, .5, .25]) {
                 await pointer.move(x - (1 - p) * travel, y);
                 const sample = await progress(track);
@@ -161,7 +174,8 @@ for (const theme of ['light', 'dark']) for (const touch of [false, true]) {
             const frames: { p: number; tint: number; x: number; flow: number }[] = await page.evaluate(() => (window as any).__colourFrames);
             expect(frames.filter(frame => frame.p > .1 && frame.p < .9).length).toBeGreaterThan(5);
             expect(frames.filter(frame => Math.abs(frame.p - frame.tint) >= .001 || Math.abs(frame.p - frame.x) >= .001).slice(0, 8)).toEqual([]);
-            expect(Math.max(...frames.map(frame => frame.flow))).toBeGreaterThan(.1);
+            expect(Math.max(...frames.map(frame => frame.flow))).toBeGreaterThan(.01);
+            expect(Math.max(...frames.map(frame => frame.flow))).toBeLessThan(.35);
             expect(await page.evaluate(() => (window as any).__calls.filter((call: any[]) => call[0] === 'remember_draft'))).toHaveLength(2);
             expect(await page.evaluate(() => (window as any).__calls.some((call: any[]) => call[0] === 'save_device'))).toBe(false);
         } finally { await context.close(); }
@@ -178,7 +192,7 @@ test('a stretched droplet settles after release without shrinking below its rest
         const y = button.y + button.height / 2, x = button.x + button.width / 2;
         await pointer.down(x, y); await page.waitForTimeout(400);
         for (let step = 1; step <= 7; step++) await pointer.move(x + step * 9, y);
-        await expect.poll(async () => (await shape(lens)).flow).toBeGreaterThan(.4);
+        await expect.poll(async () => (await shape(lens)).flow).toBeGreaterThan(.08);
         await lens.evaluate(element => {
             const start = performance.now();
             (window as any).__releaseHeights = [];

@@ -7,7 +7,7 @@
     --control-height: 42px;
     --segment-height: 42px;
     --icon-size: 18px;
-    --toggle-width: 56px;
+    --toggle-width: 64px;
     --toggle-height: 34px;
     font-size: var(--text-body);
 }
@@ -76,7 +76,7 @@
     .device-panel, .reset-card { grid-column: auto; grid-row: auto; align-self: stretch; }
 }
 @media (hover: none), (pointer: coarse) {
-    :root { --text-micro: 12px; --text-caption: 13px; --text-label: 14px; --text-body: 16px; --control-height: 48px; --segment-height: 48px; --icon-size: 20px; --toggle-width: 64px; --toggle-height: 38px; }
+    :root { --text-micro: 12px; --text-caption: 13px; --text-label: 14px; --text-body: 16px; --control-height: 48px; --segment-height: 48px; --icon-size: 20px; --toggle-width: 72px; --toggle-height: 38px; }
     .log-filter > button { min-height: 48px; }
     .text-button { min-height: 40px; }
 }

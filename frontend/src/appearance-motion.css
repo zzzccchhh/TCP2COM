@@ -1,0 +1,2 @@
+/* Palette animation owns colour timing; geometry, presence and lens motion keep their clocks. */
+html[data-theme-transition] { --colour-duration: 0s; }

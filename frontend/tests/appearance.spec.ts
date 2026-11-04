@@ -131,7 +131,7 @@ for (const [width, height, touch] of [[1440, 1000, false], [1024, 1366, true], [
             await expect(page.getByLabel('业务 COM', { exact: true })).toHaveValue('COM88');
             await page.getByRole('button', { name: '打开远程复位', exact: true }).click();
             await settle(page); await page.screenshot({ path: `test-results/appearance-dark-reset-${width}.png` });
-            await page.getByRole('button', { name: '关闭面板', exact: true }).click();
+            await page.getByRole('button', { name: width <= 760 ? '返回工作台' : '关闭面板', exact: true }).click();
             await expect(page.locator('.drawer-backdrop')).toHaveCount(0);
             expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         } finally { await context.close(); }

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { transitionTheme } from './themeTransition';
 
 type Preference = 'light' | 'dark' | 'system';
 const key = 'wifi-bridge-appearance';
@@ -10,16 +11,19 @@ let preference: Preference = valid(root.dataset.appearance) ? root.dataset.appea
 let pending: Promise<unknown> = Promise.resolve();
 const listeners = new Set<() => void>();
 
-function apply() {
+function apply(animate = true) {
     const theme = preference === 'system' ? (system.matches ? 'dark' : 'light') : preference;
-    root.dataset.theme = theme;
-    root.dataset.appearance = preference;
-    root.style.colorScheme = theme;
-    root.style.backgroundColor = theme === 'dark' ? '#08080a' : '#f1f0ea';
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', root.style.backgroundColor);
-    listeners.forEach(listener => listener());
+    const commit = () => {
+        root.dataset.theme = theme;
+        root.dataset.appearance = preference;
+        root.style.colorScheme = theme;
+        root.style.backgroundColor = theme === 'dark' ? '#08080a' : '#f1f0ea';
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', root.style.backgroundColor);
+        listeners.forEach(listener => listener());
+    };
+    if (animate && root.dataset.theme !== theme) transitionTheme(commit); else commit();
 }
-apply();
+apply(false);
 system.addEventListener('change', () => { if (preference === 'system') apply(); });
 window.addEventListener('storage', event => {
     if (!desktop && (event.key === key || event.key === null)) {
@@ -41,9 +45,7 @@ export function chooseAppearance(value: string): Promise<unknown> {
     if (!valid(value)) return Promise.resolve();
     preference = value; apply();
     if (desktop) {
-        const fragment = new URLSearchParams(location.hash.slice(1));
-        fragment.set('desktop-appearance', value);
-        history.replaceState(null, '', location.pathname + location.search + '#' + fragment);
+        writeDesktopFragment(value);
         // Serialize native writes so quick choices cannot persist an older selection last.
         pending = pending.catch(() => {}).then(() => persistDesktop(value));
         return pending;
@@ -51,6 +53,13 @@ export function chooseAppearance(value: string): Promise<unknown> {
     try { localStorage.setItem(key, value); } catch { return Promise.reject(new Error()); }
     return Promise.resolve();
 }
+
+function writeDesktopFragment(value: Preference) {
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    fragment.set('desktop-appearance', value);
+    history.replaceState(history.state, '', location.pathname + location.search + '#' + fragment);
+}
+window.addEventListener('popstate', () => { if (desktop) writeDesktopFragment(preference); });
 
 function subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }
 export function useAppearance() { return useSyncExternalStore(subscribe, () => preference); }

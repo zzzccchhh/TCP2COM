@@ -142,7 +142,7 @@ body { min-height: 100vh; color: var(--ink); background: var(--page); background
 ::selection { color: var(--ink); background: var(--secondary); }
 ::-webkit-scrollbar-thumb { background: var(--field-border); }
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline-color: var(--accent); }
-button, a, input, select { transition: background .18s, border-color .18s, color .18s, box-shadow .18s, scale .42s cubic-bezier(.2, 1.6, .4, 1); }
+button, a, input, select { transition: background var(--colour-duration, .18s), border-color var(--colour-duration, .18s), color var(--colour-duration, .18s), box-shadow var(--colour-duration, .18s), scale .42s cubic-bezier(.2, 1.6, .4, 1); }
 button:active:not(:disabled) { scale: .97 .94; }
 
 .masthead { border-bottom-color: var(--line); }

@@ -1,11 +1,11 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 export type Drawer = 'config' | 'diagnostics' | 'reset' | 'help';
-type Page = 'config' | 'diagnostics';
+type Page = 'config' | 'diagnostics' | 'reset';
 type Entry = { owner: string; page: Page };
 const key = '__wifiBridgePage';
 const narrow = () => matchMedia('(max-width: 760px)').matches;
-const isPage = (value: unknown): value is Page => value === 'config' || value === 'diagnostics';
+const isPage = (value: unknown): value is Page => value === 'config' || value === 'diagnostics' || value === 'reset';
 const entry = (): Entry | undefined => history.state?.[key];
 
 /** Navigation uses history state only, leaving pairing URLs and appearance fragments intact. */

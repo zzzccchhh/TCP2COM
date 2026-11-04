@@ -45,9 +45,9 @@ function snapshotStyles() {
         try { return [...sheet.cssRules].map(rule => rule.cssText).join('\n'); } catch { return ''; }
     }).join('\n') + `
         *, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }
-        .glass-surface::before, .liquid-raised-optics, .liquid-flow-optics { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+        .glass-surface::before, .liquid-raised-optics, .liquid-lens-sheen { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
         .liquid-elastic-lens::before { opacity: 1 !important; }
-        .liquid-raised-optics, .liquid-flow-optics { display: none !important; }
+        .liquid-raised-optics, .liquid-lens-sheen { display: none !important; }
         [data-slide-context]::before, [data-slide-context]::after { content: none !important; }
     `;
 }
