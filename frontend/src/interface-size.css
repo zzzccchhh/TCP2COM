@@ -30,7 +30,7 @@
 .icon-button > svg { width: var(--icon-size); height: var(--icon-size); }
 .picker-toggle { width: var(--control-height); }
 .glass-picker.editable input { padding-right: calc(var(--control-height) + 4px); }
-.picker-heading { padding: 12px; font-size: var(--text-label); }
+.picker-heading { padding: 8px 12px 6px; font-size: var(--text-caption); }
 .picker-list > button { min-height: var(--control-height); padding: 11px 12px; font-size: var(--text-body); }
 .picker-list > button > svg { width: var(--icon-size); height: var(--icon-size); }
 .disclosure-trigger { min-height: var(--control-height); font-size: var(--text-label); }

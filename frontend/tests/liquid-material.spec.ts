@@ -180,7 +180,7 @@ test('menus animate one glass sheet and confirmation focus waits for the visible
     await expect(popup).toHaveAttribute('data-state', 'open');
     const frames = await popup.evaluate(async element => {
         const frames: { width: number; sheet: number }[] = [];
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 12; i++) {
             await new Promise(requestAnimationFrame);
             frames.push({ width: element.getBoundingClientRect().width,
                 sheet: (window as any).__glassReveal(element.querySelector('.picker-window')) });
@@ -267,7 +267,7 @@ test('quick reversals continue the current glass and text progress without an op
         const entering = { duration: getComputedStyle(glass, '::before').transitionDuration,
             curve: getComputedStyle(glass, '::before').transitionTimingFunction };
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        const until = performance.now() + 60;
+        const until = performance.now() + 120;
         while (performance.now() < until) await new Promise(requestAnimationFrame);
         const before = parseFloat(getComputedStyle(text).opacity);
         const exiting = { duration: getComputedStyle(glass, '::before').transitionDuration,

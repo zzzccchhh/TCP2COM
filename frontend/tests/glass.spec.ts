@@ -34,6 +34,7 @@ test('resizing and reopening panels release optical resources and preserve input
     await expect(page.getByText('浏览器界面预览', { exact: false })).toBeVisible();
     await page.screenshot({ path: 'test-results/glass-desktop.png', fullPage: true });
     const com = page.getByLabel('业务 COM', { exact: true });
+    await com.click();
     await com.fill('COM91');
     await page.getByText('高级参数', { exact: true }).click();
     await expect.poll(() => page.locator('.connection-panel').evaluate(element => {
@@ -77,6 +78,7 @@ test('unsupported filters and reduced motion keep controls usable', async ({ pag
     await page.goto('/');
     await expect(page.locator('.connection-panel')).toHaveAttribute('data-glass', 'frosted');
     await expect(page.locator('svg.liquid-glass-defs')).toHaveCount(0);
+    await page.getByLabel('业务 COM', { exact: true }).click();
     await page.getByLabel('业务 COM', { exact: true }).fill('COM92');
     await page.locator('.connection-panel').hover();
     expect(await page.locator('.connection-panel').evaluate(element => (element as HTMLElement).style.getPropertyValue('--glass-light-x'))).toBe('');

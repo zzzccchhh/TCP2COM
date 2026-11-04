@@ -5,6 +5,8 @@ import { Check, ChevronDown } from 'lucide-react';
 import GlassSurface from './GlassSurface';
 import { usePresence } from './usePresence';
 import { useExitBounds } from './useExitBounds';
+import { usePickerMorph } from './usePickerMorph';
+import type { PickerOrigin } from './usePickerMorph';
 
 type Props = {
     label: string; value: string | number; onChange: (value: string) => void;
@@ -16,7 +18,10 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
     const id = useId();
     const trigger = useRef<HTMLSelectElement | HTMLInputElement | null>(null);
     const popup = useRef<HTMLElement | null>(null);
+    const listbox = useRef<HTMLDivElement>(null);
     const wrap = useRef<HTMLSpanElement>(null);
+    const toggle = useRef<HTMLButtonElement>(null);
+    const origin = useRef<PickerOrigin>({ x: 0, y: 0, size: 32, upwards: false });
     const optionNodes = useRef<(HTMLButtonElement | null)[]>([]);
     const [open, setOpen] = useState(false);
     const [positioned, setPositioned] = useState(false);
@@ -26,22 +31,44 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
     useExitBounds(open, presence.present, popup);
     const [active, setActive] = useState(0);
     const [query, setQuery] = useState('');
+    const [editing, setEditing] = useState(false);
+    const editMode = useRef(false);
+    const browsingFromEdit = useRef(false);
+    const navigated = useRef(false);
     const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
     const [highlight, setHighlight] = useState({ top: 0, height: 0 });
     const editable = !!list;
+    usePickerMorph(popup, origin, presence.present, presence.entered, open && prepared, position, presence.finishExit);
     const entries: [string | number, string][] = options ?? (list
         ? Array.from((document.getElementById(list) as HTMLDataListElement | null)?.options ?? []).map(option => [option.value,
             option.label && option.label !== option.value ? `${option.value} · ${option.label}` : option.value])
         : []);
     const shown = query ? entries.filter(([key, text]) => `${key} ${text}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())) : entries;
 
-    function close() { setOpen(false); }
-    function reveal() {
+    function stopEditing() {
+        editMode.current = false; setEditing(false);
+        // Set the native flag before focus changes, so touch engines cannot reopen the keyboard.
+        if (trigger.current instanceof HTMLInputElement) { trigger.current.readOnly = true; trigger.current.inputMode = 'none'; }
+    }
+    function focusBrowser(inList = false) {
+        stopEditing();
+        (editable ? inList && presence.entered ? listbox.current : toggle.current : trigger.current)?.focus({ preventScroll: true });
+    }
+    function close() { stopEditing(); setOpen(false); }
+    function reveal(input = false) {
         if (disabled || trigger.current?.matches(':disabled')) return;
         window.dispatchEvent(new CustomEvent('glass-picker-open', { detail: id }));
-        setQuery('');
-        setActive(Math.max(0, entries.findIndex(([key]) => String(key) === String(value))));
-        trigger.current?.focus({ preventScroll: true });
+        if (!open || !input) {
+            setQuery('');
+            navigated.current = false;
+            setActive(Math.max(0, entries.findIndex(([key]) => String(key) === String(value))));
+        }
+        if (input && editable && trigger.current instanceof HTMLInputElement) {
+            navigated.current = false;
+            editMode.current = true; setEditing(true); trigger.current.readOnly = false;
+            trigger.current.inputMode = 'text';
+            trigger.current.focus({ preventScroll: true });
+        } else focusBrowser(true);
         setOpen(true);
     }
     function choose(index: number) {
@@ -50,12 +77,16 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
         if (!entry) return;
         if (String(entry[0]) !== String(value)) onChange(String(entry[0]));
         close();
-        trigger.current?.focus({ preventScroll: true });
+        focusBrowser();
     }
     useLayoutEffect(() => { if (open && (disabled || trigger.current?.matches(':disabled'))) close(); });
     useLayoutEffect(() => {
         if (!presence.present) { setPositioned(false); setOpticsReady(false); }
     }, [presence.present]);
+    useLayoutEffect(() => {
+        // Browsing focus belongs to a listbox, not an editable field or an unsupported button active-descendant.
+        if (editable && open && presence.entered && !editing) listbox.current?.focus({ preventScroll: true });
+    }, [editable, open, presence.entered, editing]);
     useLayoutEffect(() => {
         if (!presence.present) return;
         function place() {
@@ -71,11 +102,15 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             const below = bottom - rect.bottom - 12;
             const above = rect.top - topEdge - 12;
             const upwards = below < 210 && above > below;
-            const width = Math.min(Math.max(rect.width, 280), viewportWidth - 24);
+            const width = Math.min(Math.max(rect.width, 240), viewportWidth - 24);
             const maxHeight = Math.min(330, Math.max(90, upwards ? above : below));
             const left = Math.max(leftEdge + 12, Math.min(rect.left, leftEdge + viewportWidth - width - 12));
             const height = Math.min(popup.current?.offsetHeight || maxHeight, maxHeight);
             const top = upwards ? rect.top - height - 7 : rect.bottom + 7;
+            const source = editable ? toggle.current?.getBoundingClientRect() : null;
+            const size = Math.min(source?.height ?? rect.height, source?.width ?? rect.height) * .82;
+            origin.current = { x: (source ? source.left + source.width / 2 : rect.right - rect.height / 2) - left,
+                y: rect.top + rect.height / 2 - top, size, upwards };
             setPosition({ left, top, width, maxHeight, '--picker-edge': upwards ? '100%' : '0%',
                 '--picker-clip-top': upwards ? '100%' : '0%', '--picker-clip-bottom': upwards ? '0%' : '100%',
             } as CSSProperties);
@@ -87,10 +122,10 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             if (!wrap.current?.contains(target) && !popup.current?.contains(target)) close();
         }
         function escape(event: globalThis.KeyboardEvent) {
-            if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); close(); }
+            if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); close(); focusBrowser(); }
         }
         function other(event: Event) { if ((event as CustomEvent).detail !== id) close(); }
-        function navigationBack(event: Event) { if (open) { event.preventDefault(); close(); trigger.current?.focus({ preventScroll: true }); } }
+        function navigationBack(event: Event) { if (open) { event.preventDefault(); close(); focusBrowser(); } }
         function scroll(event: Event) { if (!popup.current?.contains(event.target as Node)) place(); }
         place();
         const observer = new ResizeObserver(place);
@@ -132,17 +167,22 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
     }, [open, active, query, shown.length]);
 
     function keyboard(event: KeyboardEvent) {
-        if (event.key === 'Tab') { close(); return; }
+        if (event.key === 'Tab') { close(); if (event.currentTarget === listbox.current) focusBrowser(); return; }
+        if (editable && event.key === 'F2') { event.preventDefault(); reveal(true); return; }
         if (event.key === 'Escape') { if (open) { event.preventDefault(); event.stopPropagation(); close(); } return; }
         if (event.key === 'F4') { event.preventDefault(); if (open) close(); else reveal(); return; }
-        if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) && (!editable || open || event.key.startsWith('Arrow'))) {
+        if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) && (!editable || !editMode.current || event.key.startsWith('Arrow'))) {
             event.preventDefault();
             if (!open) { reveal(); return; }
+            navigated.current = true;
             setActive(index => event.key === 'Home' ? 0 : event.key === 'End' ? Math.max(0, shown.length - 1)
                 : (index + (event.key === 'ArrowDown' ? 1 : Math.max(0, shown.length - 1))) % Math.max(1, shown.length));
         } else if (event.key === 'Enter' || (!editable && event.key === ' ')) {
             event.preventDefault();
-            if (open) { if (shown[active]) choose(active); else close(); } else reveal();
+            if (open) {
+                if (editable && editMode.current && !navigated.current) { close(); focusBrowser(); }
+                else if (shown[active]) choose(active); else { close(); focusBrowser(); }
+            } else reveal();
         } else if (!editable && event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
             event.preventDefault();
             if (!open) reveal();
@@ -155,31 +195,42 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
         'aria-activedescendant': open && shown[active] ? `${id}-${active}` : undefined,
         'aria-haspopup': 'listbox' as const,
     };
-    return <span ref={wrap} data-open={open || undefined} className={`select-wrap glass-picker ${editable ? 'editable' : ''}`}>
+    return <span ref={wrap} data-open={open || undefined} data-editing={editing || undefined} className={`select-wrap glass-picker ${editable ? 'editable' : ''}`}
+        onPointerDownCapture={() => { wrap.current!.dataset.pointerFocus = 'true'; }}
+        onKeyDownCapture={() => { delete wrap.current!.dataset.pointerFocus; }}
+        onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) delete event.currentTarget.dataset.pointerFocus; }}>
         {editable ? <input ref={element => { trigger.current = element; }} aria-label={label} role="combobox" {...accessibility}
             aria-autocomplete="list" autoComplete="off" spellCheck={false} value={value ?? ''} disabled={disabled}
-            onKeyDown={keyboard} onClick={() => { if (!open) reveal(); }}
-            onChange={event => { if (!open) reveal(); onChange(event.target.value); setQuery(event.target.value); setActive(0); }} />
+            readOnly={!editing} inputMode={editing ? 'text' : 'none'} aria-keyshortcuts="F2" onKeyDown={keyboard}
+            onPointerDown={event => { if (event.button === 0) reveal(true); }}
+            onBlur={() => stopEditing()}
+            onChange={event => { if (!open) reveal(true); navigated.current = false; onChange(event.target.value); setQuery(event.target.value); setActive(0); }} />
             : <select ref={element => { trigger.current = element; }} aria-label={label} {...accessibility}
                 value={value ?? ''} disabled={disabled} onChange={event => { onChange(event.target.value); close(); }}
                 onKeyDown={keyboard} onPointerDown={event => { event.preventDefault(); if (open) close(); else reveal(); }}>
                 {entries.map(([key, text]) => <option key={key} value={key} aria-hidden={open || undefined}>{text}</option>)}
             </select>}
-        {editable ? <button className="picker-toggle" type="button" aria-label={`选择${label}`} disabled={disabled}
-            onPointerDown={event => event.preventDefault()} onClick={() => { if (open) close(); else reveal(); }}><ChevronDown size={13} /></button>
+        {editable ? <button ref={toggle} className="picker-toggle" type="button" aria-label={`选择${label}`} disabled={disabled}
+            aria-expanded={open} aria-controls={presence.present ? id : undefined} aria-haspopup="listbox" onKeyDown={keyboard}
+            onPointerDown={event => { browsingFromEdit.current = editMode.current; event.preventDefault(); focusBrowser(); }}
+            onClick={() => {
+                if (open && !browsingFromEdit.current && !editMode.current) close();
+                else { setQuery(''); reveal(); }
+                browsingFromEdit.current = false;
+            }}><ChevronDown size={13} /></button>
             : <ChevronDown size={13} />}
         {presence.present && createPortal(<div ref={element => { popup.current = element; }} className="picker-position"
             style={position} data-state={presence.entered ? 'open' : 'closed'} data-ready={prepared || undefined}
             aria-hidden={!open || undefined} inert={!open}>
+            <span className="picker-motion-clock" aria-hidden="true" />
+            <div className="picker-morph" aria-hidden="true" />
             <GlassSurface className="picker-window" aria-label={`${label}选项`} opticsEnabled={positioned}
-                onGlassReady={() => setOpticsReady(true)} onTransitionEnd={event => {
-                    if (!open && event.target === event.currentTarget && event.pseudoElement === '::before'
-                        && event.propertyName === 'clip-path') presence.finishExit();
-                }}>
+                onGlassReady={() => setOpticsReady(true)}>
                 <div className="picker-content">
                     <div className="picker-heading">{label}</div>
-                    <div className="picker-list" role="listbox" id={id} aria-label={`${label}选项`}>
-                        {shown.length > 0 && <GlassSurface as="div" className="liquid-indicator picker-highlight" aria-hidden="true"
+                    <div ref={listbox} className="picker-list" role="listbox" id={id} aria-label={`${label}选项`}
+                        tabIndex={editable ? -1 : undefined} aria-activedescendant={open && shown[active] ? `${id}-${active}` : undefined} onKeyDown={keyboard}>
+                        {shown.length > 0 && <GlassSurface as="div" className="liquid-indicator picker-highlight" aria-hidden="true" opticsEnabled={false} data-glass="frosted"
                             style={{ '--liquid-y': `${highlight.top}px`, height: highlight.height } as CSSProperties} />}
                         {shown.map(([key, text], index) => <button type="button" role="option" tabIndex={-1} id={`${id}-${index}`} key={key}
                             ref={element => { optionNodes.current[index] = element; }} aria-selected={String(key) === String(value)}

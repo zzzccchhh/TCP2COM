@@ -38,7 +38,7 @@ for (const touch of [false, true]) {
             await ready(page);
             await settled(page);
             const ids = await page.locator('.liquid-glass-defs').evaluateAll(nodes => nodes.map(node => node.outerHTML));
-            const main = page.getByLabel('业务 COM', { exact: true }); await main.fill('COM66');
+            const main = page.getByLabel('业务 COM', { exact: true }); await main.click(); await main.fill('COM66');
             await page.getByLabel('外观', { exact: true }).click();
             await page.getByRole('option', { name: '深色', exact: true }).click();
             await pause(page);

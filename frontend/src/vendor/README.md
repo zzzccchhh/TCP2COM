@@ -73,14 +73,25 @@ settings), with pointer capture and a single commit on release. A separate
 position anchor leaves the thumb free to use the same lift/droplet springs as
 segmented controls, including keyboard pulses and touch cancellation. Confirmation
 checkboxes keep checkbox semantics. `LiquidDisclosure` animates grid height while
-keeping collapsed fields inert and preserving their values. Menus settle their
-constrained width and position before attaching optics. Their readiness callback
-waits for the displacement bitmap to decode; the initial highlight is laid out
-without transitions. Opening and closing then animate the same optical sheet
-with the same duration and easing, while text is revealed/clipped at full size.
-The sampling surface stays fixed; its clip rectangle reveals the material.
-The wrapper never scales or covers its trigger, and interrupted transitions
-resume without a repeated text delay. Overlay ancestors stay opaque so
+keeping collapsed fields inert and preserving their values. Editable pickers
+separate browsing from editing: their arrow focuses the listbox without activating
+an input, while pointer contact on the data or F2 enables native text entry.
+Selecting returns to a read-only value and a non-input focus target. Native value
+changes remain live; Enter preserves typed custom values unless the user explicitly
+navigated a candidate. Label clicks or focus alone do not enable editing.
+
+Menus settle constrained layout and decode their bounded optical map before entry.
+`usePickerMorph` contracts a small contour at the arrow, lifts it clear of the data,
+then expands it in two dimensions into the final rounded menu. Closing reverses
+the same 380ms timeline; interrupted travel starts at the last painted progress.
+A zero-size Web Animations clock supplies easing and participates in animation
+waits; requestAnimationFrame updates local contour/clip/light properties only.
+The optical sampling surface stays fixed, while contour opacity gradually yields
+to the decoded material. Text is clipped/revealed at native size and never moves
+through the data field. A row highlight uses static glass, without a second
+backdrop filter. Width/height allocation and SVG maps do not change per morph frame.
+Reduced motion or hidden documents settle immediately and release completed exits.
+Overlay ancestors stay opaque so
 opacity does not create a temporary backdrop root during the morph; the backdrop
 color, geometry and individual content layers provide the transition instead.
 

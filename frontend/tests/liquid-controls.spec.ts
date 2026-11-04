@@ -92,6 +92,7 @@ test('editable suggestions preserve custom baud and COM input', async ({ page })
     await page.getByRole('option', { name: 'COM88 · USB Serial', exact: true }).click();
     await expect(page.getByLabel('业务 COM', { exact: true })).toHaveValue('COM88');
     const baud = page.getByLabel('波特率 / bps', { exact: true });
+    await baud.click();
     await baud.fill('2500000');
     await expect(baud).toHaveValue('2500000');
     await expect(page.getByRole('listbox', { name: '波特率 / bps选项', exact: true })).toBeVisible();

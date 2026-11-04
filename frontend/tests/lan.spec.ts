@@ -27,6 +27,7 @@ test('online links auto connect desktop and mobile, synchronize and revoke witho
             }).toBeLessThan(2);
             await page.evaluate(() => window.scrollTo(0, 0));
         }
+        await a.getByLabel('业务 COM', { exact: true }).click();
         await a.getByLabel('业务 COM', { exact: true }).fill('COM88');
         await expect(b.getByLabel('业务 COM', { exact: true })).toHaveValue('COM88');
         await b.reload();

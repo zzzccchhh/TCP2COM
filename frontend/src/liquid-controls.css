@@ -86,8 +86,12 @@
 .glass-picker > svg { transition: transform .22s; }
 .glass-picker[data-open] > svg { transform: translateY(-50%) rotate(180deg); }
 .glass-picker.editable input { padding-right: 29px; }
+.glass-picker.editable input[readonly] { cursor: text; }
 .picker-toggle { position: absolute; right: 1px; top: 1px; bottom: 1px; display: grid; place-items: center; width: 27px; background: transparent; border: 0; border-radius: 0 8px 8px 0; color: var(--muted); }
 .picker-toggle:hover:not(:disabled) { background: var(--hover); }
+.picker-toggle:active:not(:disabled) { scale: none; }
+.picker-toggle:focus-visible { outline: none; }
+.glass-picker:not([data-pointer-focus]):has(.picker-toggle:focus-visible) { border-radius: 10px; outline: 2px solid var(--accent); outline-offset: 3px; }
 .picker-toggle svg { transition: transform .22s; }
 .glass-picker[data-open] .picker-toggle svg { transform: rotate(180deg); }
 .picker-position {
@@ -104,21 +108,33 @@
 }
 .picker-position[data-state="open"] { visibility: visible; transition-delay: 0s; }
 .picker-position[data-state="closed"] { pointer-events: none; }
-/* One optical sheet opens and closes in place; layout, glyph size and filter geometry stay fixed. */
-.picker-window { display: flex; flex-direction: column; min-height: 0; max-height: inherit; padding: 6px; border: 0; border-radius: 20px; box-shadow: none; }
-.picker-window::before {
-    background: linear-gradient(135deg, var(--pane-top), var(--pane-bottom) 55%, var(--pane-bottom));
-    border: 1px solid var(--border);
-    box-shadow: 0 14px 45px var(--lens-shadow-strong), inset 0 1px 0 var(--highlight-strong);
-    clip-path: inset(var(--picker-clip-top, 0%) 0 var(--picker-clip-bottom, 100%) 0 round 20px);
+/* A local contour morphs from the trigger; the optical sheet and text never move or scale. */
+.picker-motion-clock { position: absolute; width: 0; height: 0; pointer-events: none; }
+.picker-morph {
+    position: absolute; z-index: 0; pointer-events: none;
+    left: var(--picker-shape-x, 0px); top: var(--picker-shape-y, 0px);
+    width: var(--picker-shape-width, 0px); height: var(--picker-shape-height, 0px);
+    border-radius: var(--picker-shape-radius, 26px);
+    border: 1px solid var(--highlight-strong);
+    box-shadow: 0 calc(2px + var(--picker-progress, 0) * 12px) calc(6px + var(--picker-progress, 0) * 32px) var(--lens-shadow-strong),
+        inset 0 1px 1px var(--highlight-strong), inset 0 -1px 1px var(--edge-bottom);
 }
-.picker-position[data-ready] .picker-window::before { transition: clip-path var(--picker-duration) var(--picker-easing); }
-.picker-position[data-state="open"] .picker-window::before { clip-path: inset(0 0 0 0 round 20px); }
-.picker-content { display: flex; flex-direction: column; min-height: 0; opacity: 0; clip-path: inset(var(--picker-clip-top, 0%) 0 var(--picker-clip-bottom, 100%) 0); }
-.picker-position[data-ready] .picker-content { transition: opacity var(--picker-duration) var(--picker-easing), clip-path var(--picker-duration) var(--picker-easing); }
-.picker-position[data-state="open"] .picker-content { opacity: 1; clip-path: inset(0 0 0 0); }
-.picker-heading { padding: 9px 10px 10px; font-size: var(--text-body); font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); }
+.picker-morph::before {
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    background: radial-gradient(ellipse at 50% 0%, var(--lens-light), transparent 65%), linear-gradient(145deg, var(--glass-top), var(--glass-bottom));
+    opacity: calc(1 - var(--picker-sheet-opacity, 0));
+}
+.picker-window { display: flex; flex-direction: column; min-height: 0; max-height: inherit; padding: 8px; border: 0; border-radius: 26px; box-shadow: none; z-index: 1; }
+.picker-window::before {
+    background: radial-gradient(ellipse at 40% 0%, var(--lens-light), transparent 65%), linear-gradient(145deg, var(--glass-top), var(--glass-bottom));
+    opacity: var(--picker-sheet-opacity, 0);
+    clip-path: var(--picker-sheet-clip, inset(0 0 100% 0 round 26px));
+    box-shadow: none;
+}
+.picker-content { display: flex; flex-direction: column; min-height: 0; opacity: var(--picker-text-opacity, 0); clip-path: var(--picker-content-clip, inset(0 0 100% 0)); }
+.picker-heading { padding: 7px 12px 5px; font-size: var(--text-caption); font-weight: 500; color: var(--muted); }
 .picker-list { position: relative; overflow-y: auto; min-height: 0; padding: 4px; scrollbar-width: thin; overscroll-behavior: contain; }
+.picker-list:focus { outline: none; }
 .picker-list > button { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; justify-content: space-between; width: 100%; min-height: 36px; padding: 9px 10px; background: transparent; border: 0; border-radius: 9px; text-align: left; font-size: var(--text-body); line-height: 1.5; color: var(--ink); }
 .picker-list > button + button { margin-top: 3px; }
 .picker-list > button > span { overflow-wrap: anywhere; }
@@ -126,7 +142,8 @@
 .picker-list > button.is-active { color: var(--accent-ink); }
 .picker-list > button[aria-selected="true"] { font-weight: 600; }
 .picker-list > button:active { scale: none; }
-.picker-highlight { left: 4px; width: calc(100% - 8px); z-index: 0; border-radius: 11px; }
+.picker-highlight { left: 4px; width: calc(100% - 8px); z-index: 0; border-radius: 14px; border-color: var(--highlight); box-shadow: inset 0 1px 0 var(--highlight); }
+.picker-highlight.glass-surface::before { -webkit-backdrop-filter: none; backdrop-filter: none; background: linear-gradient(160deg, var(--lens-top), var(--hover)); }
 .picker-position:not([data-ready]) .picker-highlight { transition: none; }
 .picker-empty { padding: 16px 10px; font-size: var(--text-body); color: var(--muted); line-height: 1.7; }
 
@@ -193,7 +210,7 @@
     .liquid-overlay[data-state="open"] > .drawer { clip-path: inset(0 0 0 0 round 20px 0 0 20px); }
     .liquid-overlay .drawer::before, .liquid-overlay .confirm-dialog::before, .liquid-popover.glass-surface::before { -webkit-backdrop-filter: none; backdrop-filter: none; }
     .picker-window.glass-surface::before { -webkit-backdrop-filter: blur(8px) saturate(1.2); backdrop-filter: blur(8px) saturate(1.2); }
-    .picker-highlight.glass-surface::before { -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+    .picker-highlight.glass-surface::before { -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

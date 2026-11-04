@@ -104,7 +104,7 @@ test('system changes recolour retained portals without remounting optics or movi
     }));
     expect(colours.colour).toBe('rgb(223, 204, 255)'); // Selected row uses the brighter accent.
     await expect(page.locator('.picker-list > button').nth(1)).toHaveCSS('color', 'rgb(240, 237, 246)');
-    expect(colours.background).toContain('28, 22, 36');
+    expect(colours.background).toContain('35, 27, 48'); // Menu uses the translucent glass palette.
     await page.screenshot({ path: 'test-results/appearance-dark-config-menu.png' });
     await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
     await expect(pane).toHaveCount(0);
