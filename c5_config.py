@@ -202,7 +202,7 @@ def changed_config(baseline, edited, passwords=None, clear_passwords=(), device=
             candidate[name]["password"] = value
     validate_config(candidate, device)
     if device == "c5" and candidate["link_mode"] == 4 and base.get("config_api") != "c5-config-2":
-        raise ConfigError("四线 SPI 需要升级 C5 固件并重新读取设备")
+        raise ConfigError("SPI传输需要升级 C5 固件并重新读取设备")
     if device == "s3" and candidate["link_mode"] == 0 and base["link_mode"] != 0 and "reset_pin" not in base:
         raise ConfigError("无法确认旧版 S3 固件支持原始串口，请更新固件并重新读取")
     patch = {key: candidate[key] for key in TOP_FIELDS + NETWORK_FIELDS + ("reset_pin", "flow_pin")
@@ -236,7 +236,7 @@ def validate_patch(patch, device, baseline=None):
         raise ConfigError("S3 的 2.4 GHz 信道必须为 1～13")
     if baseline is not None:
         if device == "c5" and patch.get("link_mode", baseline.get("link_mode")) == 4 and baseline.get("config_api") != "c5-config-2":
-            raise ConfigError("四线 SPI 需要升级 C5 固件并重新读取设备")
+            raise ConfigError("SPI传输需要升级 C5 固件并重新读取设备")
         if "flow_pin" in patch and (device != "c5" or "flow_pin" not in baseline):
             raise ConfigError("设备未报告流控配置，请更新固件并重新读取")
         if "reset_pin" in patch and "reset_pin" not in baseline:

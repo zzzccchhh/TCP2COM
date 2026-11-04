@@ -37,7 +37,7 @@ tcp2com 使用速查
 
 二、选择设备与接口
 
-C5：2.4/5GHz/AUTO；原始 UART=0、UART GPIO 流控=3、四线 SPI 简易写入=4。
+C5：2.4/5GHz/AUTO；原始 UART=0、UART GPIO 流控=3、SPI传输=4。
 旧 C5 SPI WBR=1、UART WBR=2 停用。S3：仅 2.4GHz，保留原始 UART=0、SPI WBR=1、UART WBR=2。
 不要把两种固件的接口编号和 MCU 库混用。
 

@@ -34,7 +34,7 @@ ESP_LEVEL = re.compile(r"^\s*([EWIDV])\s+\(\s*\d+\s*\)")
 def payload_interfaces(device):
     if device == "c5":
         return {"请选择接口（旧接口已移除）": -1, "UART 原始透传": 0,
-                "四线 SPI 简易写入": 4, "UART GPIO 流控透传": 3}
+                "SPI传输": 4, "UART GPIO 流控透传": 3}
     return {"UART 原始透传": 0, "SPI WBR/1": 1, "UART WBR/1": 2}
 
 

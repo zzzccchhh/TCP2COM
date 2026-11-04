@@ -247,9 +247,13 @@ test('new C5 exposes GPIO flow mode and pin without changing S3 options', async 
     const panel = page.getByRole('dialog', { name: '设备配置面板' });
     await panel.getByRole('button', { name: '读取设备', exact: true }).click();
     const mode = panel.getByLabel('MCU 接口', { exact: true });
-    await expect(mode.locator('option')).toHaveText(['UART 原始透传', '四线 SPI 简易写入', 'UART GPIO 流控透传']);
+    await expect(mode.locator('option')).toHaveText(['UART 原始透传', 'SPI传输', 'UART GPIO 流控透传']);
     await mode.selectOption('4');
-    await expect(panel.getByText('四线 SPI 仅发送 MCU 数据到网络', { exact: false })).toBeVisible();
+    await expect(panel.getByText('SPI传输仅发送 MCU 数据到网络', { exact: false })).toBeVisible();
+    await panel.getByRole('button', { name: '保存并重启', exact: true }).click();
+    const spiPreview = await page.evaluate(() => (window as any).__calls.findLast((row: any[]) => row[0] === 'preview_save'));
+    expect(spiPreview[1].link_mode).toBe(4);
+    await page.getByRole('dialog', { name: '确认保存设备配置' }).getByRole('button', { name: '取消', exact: true }).click();
     await mode.selectOption('3');
     await panel.getByLabel('串口流控线（高暂停 / 低允许）', { exact: true }).selectOption('4');
     await panel.getByRole('button', { name: '保存并重启', exact: true }).click();

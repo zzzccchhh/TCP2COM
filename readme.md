@@ -11,7 +11,7 @@ Python 网络到串口桥接工具，支持 TCP 客户端、TCP 服务端、固�
 | 项目 | ESP-01S | ESP32-C5 | ESP32-S3 |
 |---|---|---|---|
 | Wi-Fi | 2.4 GHz | 2.4 GHz / 5 GHz / AUTO | 2.4 GHz |
-| 业务接口 | 配套 UART 固件 | UART 原始 0、UART GPIO 流控 3、四线 SPI 写入 4 | UART 原始 0、SPI WBR 1、UART WBR 2 |
+| 业务接口 | 配套 UART 固件 | UART 原始 0、UART GPIO 流控 3、SPI传输 4 | UART 原始 0、SPI WBR 1、UART WBR 2 |
 | 原生 USB 配置/诊断 | 不提供 | 支持 | 支持 |
 | 配网按键 | 按配套固件说明 | GPIO24，长按至少 3 秒 | GPIO4，长按至少 3 秒 |
 | 配网热点 | 按配套固件说明 | `ESP32-C5-Setup` | `ESP32-S3-Setup` |
@@ -107,7 +107,7 @@ Windows 桌面界面需要 Microsoft Edge WebView2 Runtime。
 |---|---:|---|
 | UART 原始透传 | 0 | 原始字节，默认 8N1，无 GPIO 流控 |
 | UART GPIO 流控透传 | 3 | 必须选流控线，高暂停/低允许，MCU 输入上拉 |
-| 四线 SPI 简易写入 | 4 | SCK/MOSI/MISO/CS，无 READY、复位线，只上行 |
+| SPI传输 | 4 | SCK/MOSI/MISO/CS，无 READY、复位线，只上行 |
 
 `flow_pin`：1=GPIO23、2=GPIO10、3=GPIO9、4=GPIO5。模式 3 下流控线不能与启用的外部 MCU 复位线共用，MCU 响应和 DMA 尾随需满足固件预算，默认 5 ms 加 4096 字节尾随数据。
 

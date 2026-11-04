@@ -306,7 +306,7 @@ export default function App() {
 
     const field = (key: string, label: string, extra: Partial<FieldProps> = {}) => <Field key={key} label={label}
         value={settings[key]} onChange={value => change(key, value)} {...extra} />;
-    const linkOptions: [number, string][] = [[0, 'UART 原始透传'], device === 'c5' ? [4, '四线 SPI 简易写入'] : [1, 'SPI WBR/1']];
+    const linkOptions: [number, string][] = [[0, 'UART 原始透传'], device === 'c5' ? [4, 'SPI传输'] : [1, 'SPI WBR/1']];
     if (device === 'c5') linkOptions.push([3, 'UART GPIO 流控透传']);
     if (device !== 'c5') linkOptions.push([2, 'UART WBR/1']);
     if (device === 'c5' && config.link_mode === -1) linkOptions.unshift([-1, '请选择接口（旧接口已移除）']);
@@ -486,7 +486,7 @@ export default function App() {
                             {device === 'c5' && cf('flow_pin', '串口流控线（高暂停 / 低允许）', { numeric: true, options: [[0, '未选择'], [1, 'SCK / GPIO23'], [2, 'MOSI / GPIO10'], [3, 'MISO / GPIO9'], [4, 'CS / GPIO5']] })}
                             {cf('baud', '设备 UART 波特率 / bps', { numeric: true })}
                             {device !== 'esp01s' && cf('reset_pin', '外部主控复位线', { numeric: true, options: [[0, '关闭'], [1, `SCK / GPIO${device === 's3' ? 18 : 23}`], [2, 'MOSI / GPIO10'], [3, 'MISO / GPIO9'], [4, 'CS / GPIO5']] })}
-                        </div>{device === 'c5' && config.link_mode === 4 && <p>四线 SPI 仅发送 MCU 数据到网络；TCP 支持连续批量写入，UDP 每包最多 512 字节。UART 波特率、串口流控线和外部复位线在此模式下不启用。</p>}</div>
+                        </div>{device === 'c5' && config.link_mode === 4 && <p>SPI传输仅发送 MCU 数据到网络；TCP 支持连续批量写入，UDP 每包最多 512 字节。UART 波特率、串口流控线和外部复位线在此模式下不启用。</p>}</div>
                         <div className="config-section"><h3>Wi-Fi 与网络</h3><div className="form-grid">
                             {cf('mode', '设备联网模式', { numeric: true, options: [[0, '自建热点 AP'], [1, '连接电脑热点'], [2, '连接共享 Wi-Fi']] })}
                             {cf('band', 'Wi-Fi 频段', { numeric: true, options: device === 's3' ? [[0, '2.4 GHz']] : [[0, '2.4 GHz'], [1, '5 GHz'], [2, '自动（AP 使用 2.4 GHz）']] })}
