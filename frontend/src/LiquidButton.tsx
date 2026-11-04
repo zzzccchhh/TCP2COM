@@ -18,11 +18,6 @@ export default function LiquidButton({ children, className = '', disabled, ref, 
         current.id = -1; current.key = ''; current.cancelled ||= cancelled;
         motion.release(cancelled);
     }
-    function light(button: HTMLButtonElement, clientX: number, clientY: number) {
-        const box = button.getBoundingClientRect();
-        lens.current?.style.setProperty('--glass-light-x', `${Math.max(0, Math.min(box.width, clientX - box.left))}px`);
-        lens.current?.style.setProperty('--glass-light-y', `${Math.max(0, Math.min(box.height, clientY - box.top))}px`);
-    }
     useEffect(() => {
         const up = (event: PointerEvent) => { if (gesture.current.id === event.pointerId) release(event.type === 'pointercancel'); };
         const blur = () => release(true);
@@ -43,7 +38,7 @@ export default function LiquidButton({ children, className = '', disabled, ref, 
             keyboardClick.current = false;
             gesture.current = { id: event.pointerId, x: event.clientX, y: event.clientY,
                 lastX: event.clientX, time: performance.now(), cancelled: false, key: '' };
-            light(event.currentTarget, event.clientX, event.clientY); motion.press();
+            motion.press();
         }}
         onPointerMove={event => {
             onPointerMove?.(event);
@@ -54,7 +49,6 @@ export default function LiquidButton({ children, className = '', disabled, ref, 
             const box = event.currentTarget.getBoundingClientRect();
             if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) { release(true); return; }
             const now = performance.now(), distance = event.clientX - current.lastX;
-            light(event.currentTarget, event.clientX, event.clientY);
             motion.move(distance / Math.max(8, now - current.time), 0, distance);
             current.lastX = event.clientX; current.time = now;
         }}
@@ -68,7 +62,6 @@ export default function LiquidButton({ children, className = '', disabled, ref, 
             if (event.defaultPrevented || event.repeat || ![' ', 'Enter'].includes(event.key) || event.currentTarget.matches(':disabled')) return;
             keyboardClick.current = true;
             gesture.current.cancelled = false; gesture.current.key = event.key;
-            lens.current?.style.setProperty('--glass-light-x', '50%'); lens.current?.style.setProperty('--glass-light-y', '50%');
             motion.press();
         }}
         onKeyUp={event => { onKeyUp?.(event); if (gesture.current.key === event.key) release(); }}

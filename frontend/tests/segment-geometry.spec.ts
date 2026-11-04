@@ -74,10 +74,19 @@ test('reversing and regrabbing an unequal-size transition preserves the visible 
     await page.mouse.move(esp.x + esp.width / 2, esp.y + esp.height / 2); await page.mouse.down();
     await page.waitForTimeout(65);
     const anchor = group.locator('.liquid-anchor');
-    const during = (await anchor.boundingBox())!;
+    // Sample around the actual event, excluding automation/network time while the box keeps animating.
+    await group.evaluate(group => {
+        group.addEventListener('keydown', () => {
+            const anchor = group.querySelector('.liquid-anchor')!;
+            const before = anchor.getBoundingClientRect().width;
+            requestAnimationFrame(() => { (window as any).__reversalWidths = [before, anchor.getBoundingClientRect().width]; });
+        }, { capture: true, once: true });
+    });
     await page.keyboard.press('Escape'); await page.mouse.up();
-    const reversed = (await anchor.boundingBox())!;
-    expect(Math.abs(reversed.width - during.width)).toBeLessThan(12);
+    const widths = await page.evaluate(async () => {
+        await new Promise(requestAnimationFrame); return (window as any).__reversalWidths as number[];
+    });
+    expect(Math.abs(widths[1] - widths[0])).toBeLessThan(12);
     await settle(page);
     expect(await page.evaluate(() => (window as any).__maps)).toBeLessThanOrEqual(3);
     const all = group.getByRole('button', { name: /^全部/ });

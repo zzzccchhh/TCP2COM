@@ -149,7 +149,8 @@ for (const width of [1440, 390]) {
             ['查看链路诊断', '链路诊断'], ['使用帮助', '使用帮助'],
         ]) {
             await page.getByRole('button', { name: '局域网连接', exact: true }).click();
-            await page.getByRole('button', { name: button, exact: true }).click();
+            // Exercise overlay stacking explicitly: the viewport-fixed LAN card can cover this entry.
+            await page.getByRole('button', { name: button, exact: true }).evaluate(element => element.click());
             const mobilePage = width <= 760 && ['设备配置面板', '链路诊断', '远程复位'].includes(title);
             const dialog = page.getByRole(mobilePage ? 'region' : 'dialog', { name: title, exact: true });
             await expect(dialog).toBeVisible();

@@ -57,13 +57,14 @@ for (const [width, height] of [[1024, 1366], [1366, 1024]]) {
             await expect(popup).toHaveAttribute('data-state', 'open');
             const early = await page.screenshot({ clip });
             await expect(page.locator('.picker-highlight')).toHaveAttribute('data-glass', 'frosted');
-            await expect(page.locator('.liquid-glass-defs')).toHaveCount(filters);
+            await expect(page.locator('.liquid-glass-defs')).toHaveCount(filters + 1); // The floating menu now owns one bounded optical map.
             expect(await popup.locator('.picker-window').evaluate(element => getComputedStyle(element, '::before').transform)).toBe('none');
             await settle(page);
             const late = await page.screenshot({ clip });
             await page.screenshot({ path: `test-results/tablet-menu-${width}.png` });
             await page.keyboard.press('Escape');
             await expect(popup).toHaveCount(0);
+            await expect(page.locator('.liquid-glass-defs')).toHaveCount(filters);
             const after = await page.screenshot({ clip });
             const changes = await imageDistances(page, [early, late, after], baseline);
             expect(changes.every(change => change.max < 8), 'opening a menu must not flash the traffic panel outside it').toBe(true);
@@ -86,13 +87,14 @@ test('tablet configuration and reset use a fixed blur mask and a stationary pane
             const pane = overlay.locator('.drawer');
             await expect(overlay).toHaveAttribute('data-state', 'open');
             await expect(overlay).toHaveCSS('backdrop-filter', 'none');
-            await expect(overlay.locator('.overlay-shade')).toHaveCSS('backdrop-filter', 'blur(6px)');
+            await expect(overlay.locator('.overlay-shade')).toHaveCSS('backdrop-filter', 'blur(2px)');
             const sampling = await pane.evaluate(element => ({
                 scale: new DOMMatrixReadOnly(getComputedStyle(element).transform).d,
                 backdrop: getComputedStyle(element, '::before').backdropFilter,
             }));
             expect(sampling.scale).toBe(1);
-            expect(sampling.backdrop).toBe('none');
+            expect(sampling.backdrop).toContain('url(');
+            expect(sampling.backdrop).toContain('blur(1.1px)');
             const early = await page.screenshot({ clip });
             await settle(page);
             const final = await page.screenshot({ clip });

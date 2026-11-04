@@ -1,0 +1,22 @@
+.glass-surface { --glass-light-rest-x: 50%; --glass-light-rest-y: 0%; }
+.liquid-indicator, .liquid-elastic-lens { --glass-light-rest-x: 35%; }
+.picker-window, .lan-panel, .drawer, .confirm-dialog, .mobile-page-glass, .disclosure-glass, .liquid-button-material { --glass-light-rest-x: 40%; }
+/* Floating cards share real background lensing; foreground text never enters the filter. */
+.lan-panel { position: fixed; z-index: 15; display: flex; flex-direction: column; max-height: none; overflow: visible; border-radius: 26px; }
+.lan-panel > .popover-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; margin-inline: -12px; padding-inline: 12px; }
+.lan-panel > .glass-expansion-outline { z-index: 1; }
+.picker-window.glass-surface::before, .lan-panel.glass-surface::before, .drawer.glass-surface:not(.mobile-secondary-page)::before, .confirm-dialog.glass-surface::before,
+.mobile-page-glass::before, .disclosure-glass::before {
+    background: radial-gradient(ellipse at var(--glass-light-x, 40%) var(--glass-light-y, 0%), var(--lens-light), transparent 65%), linear-gradient(145deg, var(--glass-top), var(--glass-bottom));
+    -webkit-backdrop-filter: var(--glass-refraction, blur(8px) saturate(1.2));
+    backdrop-filter: var(--glass-refraction, blur(8px) saturate(1.2));
+}
+.overlay-shade { backdrop-filter: blur(2px); }
+.drawer-heading.glass-surface { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; isolation: auto; }
+.drawer-heading:not(.mobile-page-glass)::before { content: none; }
+.mobile-secondary-page .mobile-page-glass { background: transparent; isolation: isolate; }
+.disclosure-glass { padding: 12px; border-radius: 16px; box-shadow: inset 0 1px 0 var(--highlight); }
+.disclosure-glass::before { opacity: .7; }
+@media (forced-colors: active) {
+    .lan-panel, .mobile-page-glass, .disclosure-glass { background: Canvas; border-color: CanvasText; }
+}

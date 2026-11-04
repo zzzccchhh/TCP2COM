@@ -11,7 +11,7 @@ The integration uses the upstream smoothstep, rounded rectangle SDF and
 canvas/SVG displacement pipeline. It replaces demo auto-start and floating drag
 behaviour with a React lifecycle. Changes include aspect-aware geometry, bounded
 raster resolution, signed displacement normalization, a named SVG map result,
-size caching, explicit cleanup and a frosted fallback for large touch surfaces
+size caching, explicit cleanup and a frosted fallback for ordinary large touch surfaces
 or unsupported engines. Small moving control lenses keep their bounded raster
 and refraction on supported touch Chromium. Small lenses use the rounded SDF's
 edge normal with a low-blur rim; elastic controls add a small central
@@ -87,8 +87,10 @@ separate glass seed at the arrow and no contraction/lift phase. Closing reverses
 the same 380ms timeline; interrupted travel starts at the last painted progress.
 A zero-size Web Animations clock supplies easing and participates in animation
 waits; requestAnimationFrame updates local contour/clip/light properties only.
-The optical sampling surface stays fixed; only its clip/opacity and the border-only
-outline change. The outline has no additional background. Border thickness and
+The optical sampling surface stays fixed. A local expansion event adjusts only
+its existing feImage rectangle and displacement scale to follow the visible rim;
+the decoded bitmap, filter ID and final sampling allocation remain stable.
+Clip/opacity and the border-only outline share the same progress. The outline has no additional background. Border thickness and
 content padding are included when clipping, keeping the shape inside the card.
 Text is clipped/revealed at native size and never moves through the data field. A row highlight uses static glass, without a second
 backdrop filter. Width/height allocation and SVG maps do not change per morph frame.
@@ -97,14 +99,19 @@ Overlay ancestors stay opaque so
 opacity does not create a temporary backdrop root during the morph; the backdrop
 color, geometry and individual content layers provide the transition instead.
 
-Touch layouts include tablets above the phone breakpoint. Large panes use a
-lighter material, the modal shade has a fixed blur and fades as a sibling of
-the dialog, and touch drawer reveals do not move a filtered surface. Touch menu
-highlights avoid transient SVG allocations; draggable segmented lenses retain
-refraction. `useExitBounds` freezes a closing rectangle, while the LAN popover
-also retains its displayed content. Transition completion releases retained
-nodes with a timeout fallback; reopening cancels cleanup. Focus returns without
-scrolling and without stealing it from another dialog.
+Touch floating cards opt into the same bounded refraction engine as desktop:
+pickers, LAN, desktop drawers/confirmations, mobile page headers, and lighter
+inline disclosures. SDF-normal edge vectors, up to 16px displacement and 1.1px
+scattering keep background detail visibly bent while foreground text stays clear.
+Ordinary large home panels retain the touch fallback. Static row highlights do not
+allocate a second map. Unsupported engines retain frosted CSS glass.
+The modal shade uses a stationary 2px blur; touch drawer reveals do not move the
+sampling plane. `useExitBounds` freezes a closing rectangle. LAN now portals to
+body with a viewport-clamped fixed allocation before entry. Async peer/status
+updates scroll inside that allocation, with a reserved scrollbar gutter. Resize,
+rotation and visual viewport changes reposition it; exit retains content and
+bounds. Completion releases retained nodes with a timeout fallback; reopening
+cancels cleanup. Focus returns without stealing it from another dialog.
 
 The material palette now uses shared CSS variables with original warm light and
 near-black purple dark appearances. The root theme covers body-level portals too.
@@ -168,3 +175,15 @@ initial paint, unchanged visual themes and reduced motion apply directly. Native
 appearance fragment updates preserve history state and keep back destinations in
 sync with the current preference. Reset-page navigation retains the current
 device endpoint and task state without adding reset requests.
+
+`glassLight.ts` owns one continuous local light position per surface, independently
+of optical support. It begins at each surface's CSS rest coordinates, smoothly
+retargets on pointer entry/movement, and returns on leave without clearing the
+current frame. Re-entry reverses from that frame. Button contact and keyboard
+illumination use the same owner instead of competing style writes. Resize updates
+the local coordinate space; reduced motion/hidden documents settle, and unmount
+cancels frames/listeners/observers. Light frames do not touch SVG maps.
+Idle SlidingContent permits visual overflow; only active page transitions clip.
+Config content has a 16px inline paint allowance, with outgoing copies aligned to
+the unchanged form origin. LAN scroll content reserves inline space for inflated
+full-width button materials.

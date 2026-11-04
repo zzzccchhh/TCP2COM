@@ -32,8 +32,10 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.classList.add('liquid-glass-defs');
     const control = element.matches('.liquid-indicator, .liquid-toggle-thumb, .liquid-check-mark, .liquid-button-material');
+    const floating = element.matches('.picker-window, .lan-panel, .drawer:not(.mobile-secondary-page), .confirm-dialog, .mobile-page-glass, .disclosure-glass');
+    const inline = element.classList.contains('disclosure-glass');
     const elastic = element.classList.contains('liquid-elastic-lens');
-    svg.dataset.glassKind = control ? 'control' : 'surface';
+    svg.dataset.glassKind = inline ? 'detail' : control ? 'control' : 'surface';
     svg.setAttribute('width', '0');
     svg.setAttribute('height', '0');
     svg.setAttribute('aria-hidden', 'true');
@@ -65,9 +67,6 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
     let disposed = false;
     let revision = 0;
     let lastSize = '';
-    let pointerFrame = 0;
-    let pointerX = '50%';
-    let pointerY = '0%';
 
     function reset() {
         revision++;
@@ -86,7 +85,7 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
         if (!control && element.querySelector('[data-sliding]')) return;
         // Small moving controls retain refraction on touch screens; large panels use the lighter fallback.
         // Touch menu highlights are static glass; avoid allocating global SVG resources for each popup.
-        if (!context || (!control && (compact.matches || !fine.matches))
+        if (!context || (!control && !floating && (compact.matches || !fine.matches))
             || (!fine.matches && element.classList.contains('picker-highlight'))) { reset(); onReady?.(); return; }
         const width = element.offsetWidth;
         const height = element.offsetHeight;
@@ -105,7 +104,7 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
             canvas.height = h;
             const data = context.createImageData(w, h);
             const raw = new Float32Array(w * h * 2);
-            const edge = Math.min(22, Math.min(width, height) * (control ? .24 : .22));
+            const edge = Math.min(floating ? 30 : 22, Math.min(width, height) * (control ? .24 : .22));
             let extent = 0;
             for (let i = 0; i < w * h; i++) {
                 const x = ((i % w) + .5) / w * width - width / 2;
@@ -114,11 +113,11 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
                 const field = smoothStep(-edge, 0, distance);
                 // Small lenses bend perpendicular to their rim, including the long, flat sides.
                 // A radial vector makes those sides almost horizontal on a wide segmented control.
-                const nx = control ? roundedRectSDF(x + .5, y, width / 2, height / 2, radius)
+                const nx = control || floating ? roundedRectSDF(x + .5, y, width / 2, height / 2, radius)
                     - roundedRectSDF(x - .5, y, width / 2, height / 2, radius) : x;
-                const ny = control ? roundedRectSDF(x, y + .5, width / 2, height / 2, radius)
+                const ny = control || floating ? roundedRectSDF(x, y + .5, width / 2, height / 2, radius)
                     - roundedRectSDF(x, y - .5, width / 2, height / 2, radius) : y;
-                const strength = elastic ? Math.min(6, height * .14) : control ? Math.min(6, height * .16) : 7;
+                const strength = elastic ? Math.min(6, height * .14) : control ? Math.min(6, height * .16) : floating ? (inline ? 9 : 16) : 7;
                 const bend = smoothStep(0, 1, field) * strength / Math.max(.001, Math.hypot(nx, ny));
                 const centre = elastic ? (1 - smoothStep(-edge * 1.8, -edge * .3, distance)) * .04 : 0;
                 const dx = -nx * bend - x * centre;
@@ -152,7 +151,7 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
                 element.style.setProperty('--glass-refraction-raised', `url("#${id}-raised") blur(.08px) saturate(1.4)`);
             }
             if (!svg.isConnected) document.body.append(svg);
-            element.style.setProperty('--glass-refraction', `url("#${id}") blur(${control ? .15 : 12}px) saturate(1.35)`);
+            element.style.setProperty('--glass-refraction', `url("#${id}") blur(${control ? .15 : floating ? 1.1 : 12}px) saturate(1.35)`);
             element.dataset.glass = 'refractive';
             lastSize = key;
             if (onReady) {
@@ -181,33 +180,21 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
         if (event.target === element && event.propertyName === 'border-radius') schedule();
     }
 
-    function move(event: PointerEvent) {
-        if (!fine.matches || reduced.matches) return;
-        const rect = element.getBoundingClientRect();
-        pointerX = `${event.clientX - rect.left}px`;
-        pointerY = `${event.clientY - rect.top}px`;
-        if (!pointerFrame) pointerFrame = requestAnimationFrame(() => {
-            pointerFrame = 0;
-            element.style.setProperty('--glass-light-x', pointerX);
-            element.style.setProperty('--glass-light-y', pointerY);
-        });
+    function expansion(event: Event) {
+        if (!floating || element.dataset.glass !== 'refractive') return;
+        const { x, y, width, height, progress } = (event as CustomEvent).detail;
+        // Reuse one decoded map; only this card's map rectangle tracks its visible rim.
+        image.setAttribute('x', String(x)); image.setAttribute('y', String(y));
+        image.setAttribute('width', String(Math.max(1, width))); image.setAttribute('height', String(Math.max(1, height)));
+        displacement.setAttribute('scale', String((inline ? 18 : 32) * (.35 + .65 * progress)));
     }
-
-    function leave() {
-        cancelAnimationFrame(pointerFrame);
-        pointerFrame = 0;
-        element.style.removeProperty('--glass-light-x');
-        element.style.removeProperty('--glass-light-y');
-    }
-
-    function preferenceChanged() { leave(); schedule(); }
+    element.addEventListener('glass-expansion-frame', expansion);
+    function preferenceChanged() { schedule(); }
     const observer = new ResizeObserver(schedule);
     observer.observe(element);
     compact.addEventListener('change', preferenceChanged);
     fine.addEventListener('change', preferenceChanged);
     reduced.addEventListener('change', preferenceChanged);
-    element.addEventListener('pointermove', move);
-    element.addEventListener('pointerleave', leave);
     element.addEventListener('transitionend', transitionEnd);
     element.addEventListener('content-slide-end', schedule);
     // Hidden WebView2 windows suspend animation frames. Initialize once even before showing.
@@ -216,15 +203,13 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
     return () => {
         disposed = true;
         cancelAnimationFrame(frame);
-        leave();
         observer.disconnect();
         compact.removeEventListener('change', preferenceChanged);
         fine.removeEventListener('change', preferenceChanged);
         reduced.removeEventListener('change', preferenceChanged);
-        element.removeEventListener('pointermove', move);
-        element.removeEventListener('pointerleave', leave);
         element.removeEventListener('transitionend', transitionEnd);
         element.removeEventListener('content-slide-end', schedule);
+        element.removeEventListener('glass-expansion-frame', expansion);
         reset();
         delete element.dataset.glass;
     };

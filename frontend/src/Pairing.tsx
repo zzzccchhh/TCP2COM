@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { call } from './api';
 import GlassSurface from './GlassSurface';
 import LiquidButton from './LiquidButton';
@@ -14,27 +15,42 @@ export default function Pairing() {
     const [open, setOpen] = useState(false);
     const [opticsReady, setOpticsReady] = useState(false);
     const [closingContent, setClosingContent] = useState<ReactNode>(null);
-    const panelMotion = usePresence(open ? true : null, 380, opticsReady);
+    const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
+    const [positioned, setPositioned] = useState(false);
+    const panelMotion = usePresence(open ? true : null, 380, opticsReady && positioned);
     const panel = useRef<HTMLElement>(null);
     const trigger = useRef<HTMLButtonElement>(null);
     const panelId = useId();
     const origin = useRef<ExpansionOrigin>({ x: 0, upwards: false });
     const [geometry, setGeometry] = useState('');
-    // Measure only while open; closing keeps the last origin and frozen rectangle.
+    // Fix one allocation per opening. Async status/peer updates scroll inside it instead of moving the card.
     useLayoutEffect(() => {
         if (!open || !panelMotion.present) return;
+        let preferredHeight = 0;
         function measure() {
             const node = panel.current, button = trigger.current;
             if (!node || !button) return;
-            const card = node.getBoundingClientRect(), source = button.getBoundingClientRect();
-            origin.current = { x: source.left + source.width / 2 - card.left,
-                upwards: source.top + source.height / 2 > card.top + card.height / 2 };
-            setGeometry(`${origin.current.x}:${origin.current.upwards}:${card.width}:${card.height}`);
+            const viewport = window.visualViewport;
+            const vx = viewport?.offsetLeft ?? 0, vy = viewport?.offsetTop ?? 0;
+            const vw = viewport?.width ?? innerWidth, vh = viewport?.height ?? innerHeight;
+            const source = button.getBoundingClientRect();
+            const width = Math.min(460, vw - 24);
+            const left = Math.max(vx + 12, Math.min(source.right - width, vx + vw - width - 12));
+            const top = Math.max(vy + 12, Math.min(source.bottom + 8, vy + vh - 140));
+            const body = node.querySelector<HTMLElement>('.popover-content')!;
+            preferredHeight ||= body.scrollHeight + 46;
+            const height = Math.max(80, Math.min(preferredHeight, vy + vh - top - 12));
+            origin.current = { x: source.left + source.width / 2 - left, upwards: false };
+            setPosition({ position: 'fixed', left, top, width, height });
+            setGeometry(`${origin.current.x}:${width}:${height}`);
+            if (Math.abs(node.offsetWidth - width) < 1) setPositioned(true);
         }
+        // Constrain width before measuring wrapped text. Both passes happen before entry.
+        const node = panel.current!;
+        node.style.width = `${Math.min(460, (window.visualViewport?.width ?? innerWidth) - 24)}px`;
         measure();
-        const observer = new ResizeObserver(measure);
-        if (panel.current) observer.observe(panel.current);
-        if (trigger.current) observer.observe(trigger.current);
+        const observer = new ResizeObserver(() => { if (!positioned) measure(); });
+        observer.observe(node);
         window.addEventListener('resize', measure);
         window.addEventListener('scroll', measure, true);
         window.visualViewport?.addEventListener('resize', measure);
@@ -48,7 +64,7 @@ export default function Pairing() {
     useReturnFocus(panelMotion.present, trigger);
     useGlassExpansion(panel, origin, panelMotion.present, panelMotion.entered, open && opticsReady, geometry, panelMotion.finishExit);
     useLayoutEffect(() => {
-        if (!panelMotion.present) { setOpticsReady(false); setClosingContent(null); }
+        if (!panelMotion.present) { setOpticsReady(false); setPositioned(false); setClosingContent(null); setPosition({ visibility: 'hidden' }); }
     }, [panelMotion.present]);
     const [address, setAddress] = useState(serviceAddress);
     const [name, setName] = useState(defaultTerminalName);
@@ -104,12 +120,12 @@ export default function Pairing() {
                 else { setClosingContent(null); setOpen(true); if (isLAN()) void refresh(); }
             }}>局域网连接</LiquidButton>
         {status.state !== 'idle' && <span className={`lan-connection-state ${status.state}`} role="status" aria-label="服务连接状态">{status.state === 'connected' ? '服务已连接' : status.message}</span>}
-        {panelMotion.present && <GlassSurface surfaceRef={panel} className="panel lan-panel liquid-popover" aria-label="局域网连接"
-            id={panelId} data-ready={opticsReady || undefined} onGlassReady={() => setOpticsReady(true)}
+        {panelMotion.present && createPortal(<GlassSurface surfaceRef={panel} className="panel lan-panel liquid-popover" aria-label="局域网连接"
+            style={position} id={panelId} data-ready={opticsReady || undefined} onGlassReady={() => setOpticsReady(true)}
             data-state={panelMotion.entered ? 'open' : 'closed'} aria-hidden={!open || undefined} inert={!open}>
             <span className="glass-expansion-clock" aria-hidden="true" />
             <div className="glass-expansion-outline" aria-hidden="true" />
             <div className="popover-content glass-expansion-content">{open ? content : closingContent ?? content}</div>
-        </GlassSurface>}
+        </GlassSurface>, document.body)}
     </div>;
 }

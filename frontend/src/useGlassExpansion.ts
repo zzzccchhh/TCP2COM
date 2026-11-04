@@ -38,7 +38,7 @@ export function useGlassExpansion(element: RefObject<HTMLElement | null>, origin
         const content = node.querySelector<HTMLElement>('.glass-expansion-content');
         const bounds = node.getBoundingClientRect(), text = content?.getBoundingClientRect();
         const baseX = bounds.left + node.clientLeft, baseY = bounds.top + node.clientTop;
-        const textClip = text ? `inset(${Math.max(0, baseY + top - text.top)}px ${Math.max(0, text.right - baseX - left - w)}px ${Math.max(0, text.bottom - bounds.top - top - h)}px ${Math.max(0, baseX + left - text.left)}px)` : 'inset(0)';
+        const textClip = text ? `inset(${Math.max(0, baseY + top - text.top)}px ${Math.max(0, text.right - baseX - left - w)}px ${Math.max(0, text.bottom - baseY - top - h)}px ${Math.max(0, baseX + left - text.left)}px)` : 'inset(0)';
         const values: Record<string, string> = {
             '--expansion-progress': String(p), '--expansion-shape-x': `${left}px`, '--expansion-shape-y': `${top}px`,
             '--expansion-shape-width': `${w}px`, '--expansion-shape-height': `${h}px`, '--expansion-shape-radius': `${radius}px`,
@@ -47,6 +47,8 @@ export function useGlassExpansion(element: RefObject<HTMLElement | null>, origin
             '--expansion-text-opacity': String(clamp(p / .8)),
         };
         Object.entries(values).forEach(([key, value]) => node.style.setProperty(key, value));
+        const glass = node.matches('.glass-surface') ? node : node.querySelector('.picker-window');
+        glass?.dispatchEvent(new CustomEvent('glass-expansion-frame', { detail: { x: left, y: top, width: w, height: h, progress: p } }));
     }
     function stop() {
         cancelAnimationFrame(frame.current); frame.current = 0;

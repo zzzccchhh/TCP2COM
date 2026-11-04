@@ -36,6 +36,8 @@ test('resizing and reopening panels release optical resources and preserve input
     const com = page.getByLabel('业务 COM', { exact: true });
     await com.click();
     await com.fill('COM91');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.picker-position')).toHaveCount(0);
     await page.getByText('高级参数', { exact: true }).click();
     await expect.poll(() => page.locator('.connection-panel').evaluate(element => {
         const value = (element as HTMLElement).style.getPropertyValue('--glass-refraction');
@@ -81,7 +83,13 @@ test('unsupported filters and reduced motion keep controls usable', async ({ pag
     await page.getByLabel('业务 COM', { exact: true }).click();
     await page.getByLabel('业务 COM', { exact: true }).fill('COM92');
     await page.locator('.connection-panel').hover();
-    expect(await page.locator('.connection-panel').evaluate(element => (element as HTMLElement).style.getPropertyValue('--glass-light-x'))).toBe('');
+    const light = await page.locator('.connection-panel').evaluate(element => ({
+        x: parseFloat((element as HTMLElement).style.getPropertyValue('--glass-light-x')),
+        y: parseFloat((element as HTMLElement).style.getPropertyValue('--glass-light-y')),
+        restingX: (element as HTMLElement).offsetWidth / 2,
+    }));
+    expect(light.x).toBe(light.restingX);
+    expect(light.y).toBe(0);
     const button = page.getByRole('button', { name: '局域网连接', exact: true });
     await button.hover();
     await page.mouse.down();

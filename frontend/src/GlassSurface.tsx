@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { HTMLAttributes, Ref } from 'react';
+import { attachGlassLight } from './glassLight';
 import { attachLiquidGlass } from './vendor/liquid-glass-web';
 
 type Props = HTMLAttributes<HTMLElement> & {
@@ -11,6 +12,7 @@ export default function GlassSurface({ as: Tag = 'section', className = '', chil
     const surface = useRef<HTMLElement | null>(null);
     const readyCallback = useRef(onGlassReady);
     useLayoutEffect(() => { readyCallback.current = onGlassReady; }, [onGlassReady]);
+    useEffect(() => attachGlassLight(surface.current!), []);
     useEffect(() => {
         if (opticsEnabled) return attachLiquidGlass(surface.current!, onGlassReady ? () => readyCallback.current?.() : undefined);
     }, [opticsEnabled]);
