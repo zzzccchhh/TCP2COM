@@ -3,11 +3,10 @@
 .liquid-anchor {
     position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none;
     transform: translate3d(var(--liquid-x, 0px), var(--liquid-y, 0px), 0);
-    /* A single final-size allocation avoids rebuilding the refraction map during size tweens. */
+    /* FLIP interpolates the entire visible box; optics see only destination allocations. */
+    transform-origin: 0 0;
     transition: none;
 }
-.liquid-segments[data-positioned] .liquid-anchor { transition: transform .28s cubic-bezier(.22, 1, .36, 1); }
-.liquid-segments[data-dragging] .liquid-anchor { transition: none; }
 .liquid-indicator {
     position: absolute;
     left: 0;

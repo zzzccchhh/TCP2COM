@@ -10,6 +10,7 @@ import { applyDraft, call, defaults, deviceDefaults, download, emptySnapshot, is
 import type { Data } from './api';
 import Pairing from './Pairing';
 import GlassSurface from './GlassSurface';
+import LiquidButton from './LiquidButton';
 import GlassPicker from './GlassPicker';
 import LiquidSegments from './LiquidSegments';
 import SlidingContent from './SlidingContent';
@@ -339,7 +340,7 @@ export default function App() {
         <header className="masthead">
             <div className="brand"><span className="brand-mark"><Wifi size={23} strokeWidth={1.7} /></span><div><strong>Wi-Fi Bridge<span className="brand-period">.</span></strong><small>WIRELESS SERIAL WORKSPACE</small></div></div>
             <div className="header-right"><Pairing /><span className="local-indicator"><ShieldCheck size={14} />{isLAN() ? '局域网已配对' : native ? '本地运行' : '界面预览'}</span>
-                <span className="header-divider" /><button className="icon-button" title="使用帮助" aria-label="使用帮助" onClick={event => setDrawer('help', event.currentTarget)}><CircleHelp size={19} /></button>
+                <span className="header-divider" /><LiquidButton className="icon-button" title="使用帮助" aria-label="使用帮助" onClick={event => setDrawer('help', event.currentTarget)}><CircleHelp size={19} /></LiquidButton>
                 <span className="version">DESKTOP / 1.0</span></div>
         </header>
 
@@ -370,7 +371,7 @@ export default function App() {
                             {settings.mode === 'udp' && field('peer_port', 'UDP 对端端口')}
                         </div>
                         </SlidingContent>
-                        <div className="section-rule" /><div className="subheading"><Cable size={15} /><span>本地串口</span><button className="icon-button small" title="刷新串口" aria-label="刷新串口" onClick={refreshPorts}><RefreshCw size={14} /></button></div>
+                        <div className="section-rule" /><div className="subheading"><Cable size={15} /><span>本地串口</span><LiquidButton className="icon-button small" title="刷新串口" aria-label="刷新串口" onClick={refreshPorts}><RefreshCw size={14} /></LiquidButton></div>
                         <div className="form-grid">{field('com', '业务 COM', { list: 'serial-ports' })}
                             {field('baud', '波特率 / bps', { list: 'baud-rates' })}
                         </div>
@@ -387,8 +388,8 @@ export default function App() {
                         </LiquidDisclosure>
                     </fieldset>
                     <div className="connection-actions">
-                        {!snap.running ? <button className="button primary full" disabled={waiting || !ready} onClick={() => run(() => call('bridge', 'start'))}>{working ? <LoaderCircle size={15} className="spin" /> : <Play size={14} fill="currentColor" />}启动桥接<ArrowRight size={15} /></button>
-                            : <div className="form-grid"><button className="button primary" disabled={waiting} onClick={() => run(() => call('bridge', 'restart'))}><RefreshCw size={14} />应用并重启</button><button className="button" disabled={waiting} title="停止业务桥接并关闭 USB" onClick={() => run(() => call('bridge', 'stop'))}><Square size={12} />停止</button></div>}
+                        {!snap.running ? <LiquidButton className="button primary full" disabled={waiting || !ready} onClick={() => run(() => call('bridge', 'start'))}>{working ? <LoaderCircle size={15} className="spin" /> : <Play size={14} fill="currentColor" />}启动桥接<ArrowRight size={15} /></LiquidButton>
+                            : <div className="form-grid"><LiquidButton className="button primary" disabled={waiting} onClick={() => run(() => call('bridge', 'restart'))}><RefreshCw size={14} />应用并重启</LiquidButton><LiquidButton className="button" disabled={waiting} title="停止业务桥接并关闭 USB" onClick={() => run(() => call('bridge', 'stop'))}><Square size={12} />停止</LiquidButton></div>}
                         <p className="connection-note"><ShieldCheck size={12} />{snap.running ? snap.applied ? '当前参数已应用' : '参数有修改，应用并重启后生效' : '手动启动连接 · 不创建虚拟串口'}</p>
                     </div>
                 </GlassSurface>
@@ -404,9 +405,9 @@ export default function App() {
                     <SlidingContent value={tab} order={['logs', 'traffic']} fill className="workspace-content">
                     {tab === 'logs' ? <>
                         <div className="log-toolbar"><label className="search-field"><Search size={14} /><input aria-label="搜索日志" placeholder="搜索日志…" value={search} onChange={e => setSearch(e.target.value)} /></label>
-                            <div className="log-tools"><button className={`icon-button ${!autoscroll ? 'pressed' : ''}`} title={autoscroll ? '暂停自动滚动' : '恢复自动滚动'} aria-label={autoscroll ? '暂停自动滚动' : '恢复自动滚动'} onClick={() => setAutoscroll(!autoscroll)}>{autoscroll ? <Pause size={15} /> : <Play size={15} />}</button>
-                                <button className="icon-button" title="导出全部缓存日志" aria-label="导出日志" onClick={() => run(async () => download('wifi-bridge.log', await call('export_logs')))}><Download size={15} /></button>
-                                <button className="icon-button" title="清空日志" aria-label="清空日志" onClick={() => run(async () => { await call('clear_logs'); setLogs([]); })}><Trash2 size={15} /></button></div>
+                            <div className="log-tools"><LiquidButton className={`icon-button ${!autoscroll ? 'pressed' : ''}`} title={autoscroll ? '暂停自动滚动' : '恢复自动滚动'} aria-label={autoscroll ? '暂停自动滚动' : '恢复自动滚动'} onClick={() => setAutoscroll(!autoscroll)}>{autoscroll ? <Pause size={15} /> : <Play size={15} />}</LiquidButton>
+                                <LiquidButton className="icon-button" title="导出全部缓存日志" aria-label="导出日志" onClick={() => run(async () => download('wifi-bridge.log', await call('export_logs')))}><Download size={15} /></LiquidButton>
+                                <LiquidButton className="icon-button" title="清空日志" aria-label="清空日志" onClick={() => run(async () => { await call('clear_logs'); setLogs([]); })}><Trash2 size={15} /></LiquidButton></div>
                         </div>
                         <div className="log-sources"><LiquidSegments className="log-filter" label="日志来源" value={source} onChange={setSource}
                             items={[{ value: 'all', label: <>全部<span>{logs.length}</span></> }, { value: 'host', label: '上位机' }, { value: 'usb', label: 'ESP（USB）' }]} /><span className="log-retention">最近 3,000 行</span></div>
@@ -430,8 +431,8 @@ export default function App() {
             <aside className="device-column">
                 <GlassSurface className="panel usb-panel"><div className="panel-title"><span><Usb size={17} />USB 连接</span><Badge active={usbOnline} warning={usbActive && !usbOnline}>{snap.usb?.closing ? '关闭中' : usbOnline ? '已连接' : usbActive ? '重试中' : '未连接'}</Badge></div>
                     {caps ? <><div className="form-stack">{field('usb_port', '原生 USB COM', { list: 'serial-ports', disabled: waiting })}</div>
-                        <button className={`button full ${usbActive ? '' : 'secondary'}`} disabled={working || snap.busy || (snap.config_busy && !usbActive)} onClick={() => run(() => call('usb', !usbActive))}>{usbActive ? <Unplug size={15} /> : <Usb size={15} />}{usbActive ? '断开 USB' : '连接 USB'}</button>
-                        <div className="usb-caption"><span>独立于业务桥接</span><button className="text-button" onClick={event => setDrawer('diagnostics', event.currentTarget)}>诊断<ArrowUpRight size={12} /></button></div></> : <p className="muted small-copy">ESP-01S 使用业务串口和网络连接。</p>}
+                        <LiquidButton className={`button full ${usbActive ? '' : 'secondary'}`} disabled={working || snap.busy || (snap.config_busy && !usbActive)} onClick={() => run(() => call('usb', !usbActive))}>{usbActive ? <Unplug size={15} /> : <Usb size={15} />}{usbActive ? '断开 USB' : '连接 USB'}</LiquidButton>
+                        <div className="usb-caption"><span>独立于业务桥接</span><LiquidButton className="text-button" onClick={event => setDrawer('diagnostics', event.currentTarget)}>诊断<ArrowUpRight size={12} /></LiquidButton></div></> : <p className="muted small-copy">ESP-01S 使用业务串口和网络连接。</p>}
                 </GlassSurface>
 
                 <GlassSurface className="panel device-panel"><div className="panel-title"><span><Settings2 size={17} />设备配置</span><span className="section-number">02</span></div>
@@ -443,20 +444,20 @@ export default function App() {
                         <div className="device-read-state"><span className={`status-dot ${snap.baseline ? 'online' : ''}`} />{snap.baseline ? `已读取 · 修订 ${snap.baseline.revision ?? '—'}` : '尚未读取设备配置'}</div>
                         </SlidingContent>
                         <div className="device-facts"><div><span>业务接口</span><strong>{snap.baseline ? (linkOptions.find(([value]) => value === snap.baseline.link_mode)?.[1] ?? '接口已移除') : '—'}</strong></div><div><span>联网模式</span><strong>{snap.baseline ? ['自建热点 AP', '电脑热点 STA', '共享 Wi-Fi STA'][snap.baseline.mode] : '—'}</strong></div></div>
-                        <button className="button secondary full" disabled={waiting} onClick={() => run(readConfig)}>{working ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}读取设备配置</button>
-                        <button className="button full" onClick={event => setDrawer('config', event.currentTarget)}><SlidersHorizontal size={14} />打开配置面板<ArrowRight size={14} /></button>
+                        <LiquidButton className="button secondary full" disabled={waiting} onClick={() => run(readConfig)}>{working ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}读取设备配置</LiquidButton>
+                        <LiquidButton className="button full" onClick={event => setDrawer('config', event.currentTarget)}><SlidersHorizontal size={14} />打开配置面板<ArrowRight size={14} /></LiquidButton>
                         <p className="setup-note"><Info size={12} /><span>配网：{device === 'c5' ? 'Key' : 'GPIO4'} 长按 3 秒进入配网。</span></p>
                     </> : <p className="setup-note">ESP-01S 保留透传和远程复位功能。</p>}
                 </GlassSurface>
 
-                <GlassSurface className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><button className="icon-button" title="打开远程复位" aria-label="打开远程复位" onClick={event => setDrawer('reset', event.currentTarget)}><ArrowUpRight size={18} /></button></GlassSurface>
+                <GlassSurface className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><LiquidButton className="icon-button" title="打开远程复位" aria-label="打开远程复位" onClick={event => setDrawer('reset', event.currentTarget)}><ArrowUpRight size={18} /></LiquidButton></GlassSurface>
             </aside>
         </main>
 
         <GlassSurface className="metrics-strip" aria-label="桥接统计">
             {rates.map((rate, index) => <div className="metric" key={index}><span className="metric-label">{index === 0 ? <ArrowDownLeft size={14} /> : index === 1 ? <Cable size={14} /> : <ArrowUpRight size={14} />}{['网络接收', 'COM 写入', '网络发送'][index]}</span><strong>{size(rate, true)}</strong><small>{['来自 Wi-Fi 链路', '交付本地串口', '发往 Wi-Fi 链路'][index]}</small></div>)}
             <div className="metric"><span className="metric-label"><History size={14} />待写队列</span><strong>{size(snap.queued)}</strong><small>峰值 {size(snap.peak)}</small></div>
-            <div className={`metric ${dropped ? 'has-warning' : ''}`}><span className="metric-label"><Activity size={14} />累计丢弃</span><strong>{size(dropped)}</strong><button className="text-button" onClick={event => setDrawer('diagnostics', event.currentTarget)}>查看链路诊断<ArrowUpRight size={11} /></button></div>
+            <div className={`metric ${dropped ? 'has-warning' : ''}`}><span className="metric-label"><Activity size={14} />累计丢弃</span><strong>{size(dropped)}</strong><LiquidButton className="text-button" onClick={event => setDrawer('diagnostics', event.currentTarget)}>查看链路诊断<ArrowUpRight size={11} /></LiquidButton></div>
         </GlassSurface>
         <footer className="page-footer"><span><Check size={12} />{native ? snap.state_status : '本地工具 · 数据留在你的电脑'}</span><span>ESP-01S / ESP32-C5 / ESP32-S3</span></footer>
         </div>
@@ -470,11 +471,11 @@ export default function App() {
                 onTransitionEnd={event => {
                     if (!drawer && event.target === event.currentTarget && ['transform', 'clip-path'].includes(event.propertyName)) drawerMotion.finishExit();
                 }}>
-            <div className="drawer-heading">{mobilePage && <button className="page-back" aria-label="返回工作台" onClick={() => setDrawer(null)}><ChevronLeft size={22} />返回</button>}<div><div className="eyebrow">{shownDrawer === 'config' ? 'DEVICE CONFIGURATION' : shownDrawer === 'diagnostics' ? 'LINK DIAGNOSTICS' : shownDrawer === 'reset' ? 'REMOTE RESET' : 'QUICK START'}</div><h2>{{ config: `${labels[device]} 设备配置`, diagnostics: '链路诊断', reset: '远程复位', help: '开始使用工作台' }[shownDrawer]}</h2></div>{!mobilePage && <button className="icon-button" aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20} /></button>}</div>
+            <div className="drawer-heading">{mobilePage && <LiquidButton className="page-back" aria-label="返回工作台" onClick={() => setDrawer(null)}><ChevronLeft size={22} />返回</LiquidButton>}<div><div className="eyebrow">{shownDrawer === 'config' ? 'DEVICE CONFIGURATION' : shownDrawer === 'diagnostics' ? 'LINK DIAGNOSTICS' : shownDrawer === 'reset' ? 'REMOTE RESET' : 'QUICK START'}</div><h2>{{ config: `${labels[device]} 设备配置`, diagnostics: '链路诊断', reset: '远程复位', help: '开始使用工作台' }[shownDrawer]}</h2></div>{!mobilePage && <LiquidButton className="icon-button" aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20} /></LiquidButton>}</div>
             <div className="drawer-body">
                 {shownDrawer === 'config' && <>
                     <div className="notice"><Info size={16} /><span>{snap.config_status}{!snap.baseline && '。保存前必须从当前设备重新读取。'}</span></div>
-                    <div className="config-toolbar"><button className="button primary" disabled={waiting} onClick={() => run(readConfig)}><RefreshCw size={14} />读取设备</button><button className="button" disabled={waiting || !snap.baseline} onClick={() => { const next = structuredClone(snap.baseline); setConfig(next); cacheDraft(next); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); }}><RotateCcw size={14} />撤销编辑</button><button className="button" disabled={waiting || !drafts[device]} onClick={restoreDraft}><History size={14} />恢复草稿</button></div>
+                    <div className="config-toolbar"><LiquidButton className="button primary" disabled={waiting} onClick={() => run(readConfig)}><RefreshCw size={14} />读取设备</LiquidButton><LiquidButton className="button" disabled={waiting || !snap.baseline} onClick={() => { const next = structuredClone(snap.baseline); setConfig(next); cacheDraft(next); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); }}><RotateCcw size={14} />撤销编辑</LiquidButton><LiquidButton className="button" disabled={waiting || !drafts[device]} onClick={restoreDraft}><History size={14} />恢复草稿</LiquidButton></div>
                     {snap.baseline && <p className={`config-edit-state ${configDirty ? 'dirty' : ''}`}>{configDirty ? '已修改，尚未保存到设备' : snap.baseline.unsaved || snap.baseline.migration_requires_setup ? '当前运行配置待明确保存并重启' : '与本次读取的配置一致'}</p>}
                     <LiquidSegments className="config-tabs" label="配置分页" value={configTab} onChange={setConfigTab}
                         items={[{ value: 'common', label: '接口与联网' }, { value: 'ap', label: '自建热点' }, { value: 'pc', label: '电脑热点' }, { value: 'shared', label: '共享 Wi-Fi' }]} />
@@ -508,7 +509,7 @@ export default function App() {
                         <div className="form-grid">{[['ip', 'IP 地址'], ['gateway', '网关'], ['netmask', '子网掩码'], ['dns', 'DNS']].map(([key, label]) => cf(key, label, { disabled: waiting || !config[configTab]?.static_ip }, configTab))}</div>
                     </div>}
                     </SlidingContent>
-                    <div className="backup-actions"><button className="text-button" disabled={waiting} onClick={() => run(async () => { const data = await call('backup_config', config); download(`${device}-config-backup.json`, JSON.stringify(data, null, 2), 'application/json'); })}><Download size={14} />备份配置</button><button className="text-button" disabled={waiting} onClick={() => importInput.current?.click()}><FileJson size={14} />导入备份</button><small>备份与草稿均不含密码</small></div>
+                    <div className="backup-actions"><LiquidButton className="text-button" disabled={waiting} onClick={() => run(async () => { const data = await call('backup_config', config); download(`${device}-config-backup.json`, JSON.stringify(data, null, 2), 'application/json'); })}><Download size={14} />备份配置</LiquidButton><LiquidButton className="text-button" disabled={waiting} onClick={() => importInput.current?.click()}><FileJson size={14} />导入备份</LiquidButton><small>备份与草稿均不含密码</small></div>
                     <input type="file" hidden ref={importInput} accept=".json,application/json" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) run(async () => { if (file.size > 131072) throw new Error('备份文件过大'); const next = await call('import_config', await file.text()); setConfig(next); cacheDraft(next); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await pendingDraft.current; notify('已导入编辑区；尚未写入设备'); }); }} />
                 </>}
                 {shownDrawer === 'diagnostics' && <>
@@ -520,22 +521,22 @@ export default function App() {
                         ['UDP 收 / 发 / 拒绝', `${stats.udp_rx_packets || 0} / ${stats.udp_tx_packets || 0} / ${stats.udp_rejected || 0}`],
                         ['日志队列丢弃', `${snap.log_dropped} 条`],
                     ].map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl>
-                    {caps && <><h3>USB 设置</h3><fieldset disabled={waiting} className="form-stack">{field('usb_baud', 'USB 波特率')}{field('usb_log', '追加日志文件路径（可选）')}</fieldset><button className="button" disabled={waiting} onClick={() => run(() => call('usb', true))}>应用 USB 参数</button>
+                    {caps && <><h3>USB 设置</h3><fieldset disabled={waiting} className="form-stack">{field('usb_baud', 'USB 波特率')}{field('usb_log', '追加日志文件路径（可选）')}</fieldset><LiquidButton className="button" disabled={waiting} onClick={() => run(() => call('usb', true))}>应用 USB 参数</LiquidButton>
                         <h3>固件诊断字段</h3><div className={`notice ${usbStale ? 'warning' : ''}`}><Info size={15} /><span>{!snap.usb ? 'USB 未连接' : !usbOnline ? 'USB 离线 / 重试中，旧数值不代表设备在线' : snap.usb.age == null ? '尚未收到 stats' : `stats ${snap.usb.age.toFixed(1)} 秒前更新${usbStale ? '（已过期）' : ''}`}</span></div>
                         <dl className="diagnostic-list">{Object.entries(snap.usb?.fields || {}).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl></>}
                 </>}
                 {shownDrawer === 'reset' && <><div className="notice"><Zap size={16} /><span>在 3 秒内连续点击 5 次触发复位。</span></div>{device !== 'esp01s' && <div className="form-stack"><Field label="设备 IPv4 地址" value={resetHost} disabled={snap.reset.busy} onChange={setResetHost} /><Field label="控制端口" value={resetPort} disabled={snap.reset.busy} onChange={setResetPort} /></div>}
                     <div className="reset-progress">{Array.from({ length: 5 }, (_, i) => <i key={i} className={i < snap.reset.count ? 'filled' : ''} />)}</div>
-                    <button className="button primary full" disabled={snap.reset.busy} onClick={() => run(() => call('reset_click', resetHost, resetPort))}><Zap size={15} />{snap.reset.busy ? '复位请求进行中…' : `复位外部主控 · ${snap.reset.count}/5`}</button><p className="small-copy">{snap.reset.message}</p>
+                    <LiquidButton className="button primary full" disabled={snap.reset.busy} onClick={() => run(() => call('reset_click', resetHost, resetPort))}><Zap size={15} />{snap.reset.busy ? '复位请求进行中…' : `复位外部主控 · ${snap.reset.count}/5`}</LiquidButton><p className="small-copy">{snap.reset.message}</p>
                 </>}
                 {shownDrawer === 'help' && <><div className="help-step"><span>01</span><div><h3>选择设备与连接角色</h3><p>TCP 客户端主动连接设备；TCP 服务端等待设备连接；UDP 使用固定对端。</p></div></div><div className="help-step"><span>02</span><div><h3>设置业务 COM，启动桥接</h3><p>程序打开已有串口。需要虚拟串口时，请先创建串口对。电脑本地波特率不会修改设备 UART。</p></div></div><div className="help-step"><span>03</span><div><h3>按需连接 USB</h3><p>C5/S3 的 USB 用于日志和配置，可独立运行。使用 ESP-IDF monitor 前先断开 USB，等待释放端口。</p></div></div><div className="help-step"><span>04</span><div><h3>读取、编辑、明确保存</h3><p>进入配网后读取当前设备，再编辑并保存。保存会写入 NVS 并重启；保存结果不明时先重新读取核对。</p></div></div><div className="notice"><Info size={16} /><span>关闭主窗口会停止桥接并释放串口。最小化窗口继续转发。停止按钮同时关闭业务桥接与 USB。</span></div></>}
             </div>
-            {shownDrawer === 'config' && <div className="drawer-footer"><span><ShieldCheck size={14} />明确保存后写入设备 NVS</span><button className="button primary" disabled={waiting || !snap.baseline || (device === 'c5' && config.link_mode === -1)} onClick={() => run(async () => { const preview = await call<Data>('preview_save', config, passwords, clear); if (!preview.needed) notify('没有修改，无需保存'); else setConfirm({ ...preview, config: structuredClone(config), passwords: { ...passwords }, clear: [...clear] }); })}><Check size={15} />保存并重启</button></div>}
+            {shownDrawer === 'config' && <div className="drawer-footer"><span><ShieldCheck size={14} />明确保存后写入设备 NVS</span><LiquidButton className="button primary" disabled={waiting || !snap.baseline || (device === 'c5' && config.link_mode === -1)} onClick={() => run(async () => { const preview = await call<Data>('preview_save', config, passwords, clear); if (!preview.needed) notify('没有修改，无需保存'); else setConfirm({ ...preview, config: structuredClone(config), passwords: { ...passwords }, clear: [...clear] }); })}><Check size={15} />保存并重启</LiquidButton></div>}
         </GlassSurface></div>}
 
         {shownConfirm && <div className="modal-backdrop liquid-overlay" data-state={confirmMotion.entered ? 'open' : 'closed'} aria-hidden={!confirm || undefined} inert={!confirm}><div className="overlay-shade" aria-hidden="true" /><GlassSurface className="confirm-dialog" role="dialog" aria-modal="true" aria-label="确认保存设备配置" onTransitionEnd={event => {
             if (!confirm && event.target === event.currentTarget && ['transform', 'opacity'].includes(event.propertyName)) confirmMotion.finishExit();
-        }}><div className="confirm-icon"><Settings2 size={22} /></div><h2>保存配置并重启？</h2><p>以下修改将写入 {labels[device]} 的 NVS。<br />设备重启期间业务连接会中断。</p><div className="change-list">{shownConfirm.changes.length ? shownConfirm.changes.map((item: Data) => <div key={item.field}><span>{item.field}</span><strong>{item.value}</strong></div>) : <p>明确保存当前运行配置</p>}</div><div className="dialog-actions"><button className="button" disabled={working} onClick={() => setConfirm(null)}>取消</button><button className="button primary" disabled={working} onClick={() => run(async () => { const pending = shownConfirm; setConfirm(null); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await call('save_device', pending.config, pending.passwords, pending.clear, pending.epoch); notify('设备已确认保存并请求重启，请重新读取核对'); })}>{working && <LoaderCircle size={14} className="spin" />}确认保存并重启</button></div></GlassSurface></div>}
-        {toast && <div className="toast" role="status"><Info size={16} /><span>{toast}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setToast('')}><X size={14} /></button></div>}
+        }}><div className="confirm-icon"><Settings2 size={22} /></div><h2>保存配置并重启？</h2><p>以下修改将写入 {labels[device]} 的 NVS。<br />设备重启期间业务连接会中断。</p><div className="change-list">{shownConfirm.changes.length ? shownConfirm.changes.map((item: Data) => <div key={item.field}><span>{item.field}</span><strong>{item.value}</strong></div>) : <p>明确保存当前运行配置</p>}</div><div className="dialog-actions"><LiquidButton className="button" disabled={working} onClick={() => setConfirm(null)}>取消</LiquidButton><LiquidButton className="button primary" disabled={working} onClick={() => run(async () => { const pending = shownConfirm; setConfirm(null); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await call('save_device', pending.config, pending.passwords, pending.clear, pending.epoch); notify('设备已确认保存并请求重启，请重新读取核对'); })}>{working && <LoaderCircle size={14} className="spin" />}确认保存并重启</LiquidButton></div></GlassSurface></div>}
+        {toast && <div className="toast" role="status"><Info size={16} /><span>{toast}</span><LiquidButton className="icon-button" aria-label="关闭提示" onClick={() => setToast('')}><X size={14} /></LiquidButton></div>}
     </div>;
 }

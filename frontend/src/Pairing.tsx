@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { call } from './api';
 import GlassSurface from './GlassSurface';
+import LiquidButton from './LiquidButton';
 import { usePresence } from './usePresence';
 import { useExitBounds } from './useExitBounds';
 import { useReturnFocus } from './useReturnFocus';
@@ -52,27 +53,27 @@ export default function Pairing() {
         setOpen(false);
     }
     const content = <>
-            <div className="panel-title">局域网多端控制<button className="icon-button" aria-label="关闭连接面板" onClick={closePanel}>×</button></div>
+            <div className="panel-title">局域网多端控制<LiquidButton className="icon-button" aria-label="关闭连接面板" onClick={closePanel}>×</LiquidButton></div>
             <p>服务端的打开网页、复制网址或二维码均可自动连接。首次使用请打开完整连接链接；局域网工作台可直接访问。</p>
             <form onSubmit={e => { e.preventDefault(); void connect(); }}>
                 <label className="field"><span className="field-label">服务地址</span><input aria-label="服务地址" placeholder="192.168.1.100:8765" disabled={busy} value={address} onChange={e => setAddress(e.target.value)} required /></label>
                 <label className="field"><span className="field-label">终端名称</span><input aria-label="终端名称" disabled={busy} value={name} onChange={e => setName(e.target.value)} maxLength={60} required /></label>
-                <button className="button primary" disabled={busy} type="submit">{busy ? '正在连接…' : '连接服务 / 重试'}</button>
+                <LiquidButton className="button primary" disabled={busy} type="submit">{busy ? '正在连接…' : '连接服务 / 重试'}</LiquidButton>
             </form>
             <p role="status">{message || status.message}</p>
-            <button className="button" onClick={openLocal}>打开局域网工作台</button>
-            {isLAN() && <><p>当前服务：{serviceAddress()}</p><button className="button" onClick={disconnect}>断开本终端</button><button className="button" onClick={refresh}>刷新已连接终端</button>
-                <ul>{peers.map(peer => <li key={peer.id}>{peer.name}{peer.self ? '（本终端）' : ''}<button className="button" onClick={async () => {
+            <LiquidButton className="button" onClick={openLocal}>打开局域网工作台</LiquidButton>
+            {isLAN() && <><p>当前服务：{serviceAddress()}</p><LiquidButton className="button" onClick={disconnect}>断开本终端</LiquidButton><LiquidButton className="button" onClick={refresh}>刷新已连接终端</LiquidButton>
+                <ul>{peers.map(peer => <li key={peer.id}>{peer.name}{peer.self ? '（本终端）' : ''}<LiquidButton className="button" onClick={async () => {
                     try { await call('revoke', peer.id); if (peer.self) disconnect(); else await refresh(); } catch (error) { setMessage(String(error)); }
-                }}>撤销连接</button></li>)}</ul></>}
+                }}>撤销连接</LiquidButton></li>)}</ul></>}
             <p>网页仅自动连接服务，不会自动启动串口桥接或 USB。关闭网页不会停止桥接。</p>
     </>;
     return <div className="lan-entry">
-        <button ref={trigger} className="button" aria-expanded={open} aria-controls={panelMotion.present ? panelId : undefined}
+        <LiquidButton ref={trigger} className="button" aria-expanded={open} aria-controls={panelMotion.present ? panelId : undefined}
             onClick={() => {
                 if (open) closePanel();
                 else { setClosingContent(null); setOpen(true); if (isLAN()) void refresh(); }
-            }}>局域网连接</button>
+            }}>局域网连接</LiquidButton>
         {status.state !== 'idle' && <span className={`lan-connection-state ${status.state}`} role="status" aria-label="服务连接状态">{status.state === 'connected' ? '服务已连接' : status.message}</span>}
         {panelMotion.present && <GlassSurface surfaceRef={panel} className="panel lan-panel liquid-popover" aria-label="局域网连接"
             id={panelId} data-ready={opticsReady || undefined} onGlassReady={() => setOpticsReady(true)}

@@ -43,8 +43,13 @@ shape recovery is independent of one-time value commits and position snapping.
 Segmented lenses use .24/.38 width/height lift gains, compact log controls use
 .18/.32, and switch thumbs use .42/.38, all with bounded overrun. Disabled state,
 reduced motion, unmount and cancellation terminate or settle the local material.
-The anchor takes its final size directly, avoiding per-frame map regeneration
-during width transitions. Initial layout appears in place before travel is enabled.
+`useSegmentGeometry` allocates the destination size once and uses a FLIP transform
+to interpolate the entire visible box over 280ms, including unequal option widths.
+Interrupted travel reads the current visible rectangle before replacing its
+animation; direct dragging preserves the grab and release smoothly changes size.
+Optics therefore see discrete destination allocations rather than per-frame
+width changes. Live label/counter resizing does not cancel a held selection.
+Initial layout appears in place before travel is enabled.
 Hover does not move
 the lens or the picker highlight. `GlassPicker` renders a portal listbox
 with the native form value and focus, and editable suggestions for COM/baud.
@@ -52,6 +57,16 @@ with the native form value and focus, and editable suggestions for COM/baud.
 accepts a readiness gate for first entrance, and immediately resumes a retained
 overlay when reopening during exit.
 These controls use the existing engine and CSS; no animation dependency is added.
+
+`LiquidButton` keeps a native button and its original children, callbacks, form
+behaviour and refs. Only an aria-hidden decorative surface uses `useLiquidLens`;
+labels/icons paint above that surface and never scale or refract. Primary,
+secondary, circular icon and lightweight text variants share contact lighting,
+rounded lift and damped recovery. Pointer/keyboard cancellation and vertical touch
+scrolling release the material without invoking the action. Button optical maps
+are cached at rest, and hidden optical layers do not sample the page until a
+press. Text-only entries omit SVG optics. The material inherits its button's
+radius to avoid mixing capsule corner proportions with a segment's elastic rim.
 
 `LiquidToggle` retains a native labelled checkbox (switch role for boolean
 settings), with pointer capture and a single commit on release. A separate

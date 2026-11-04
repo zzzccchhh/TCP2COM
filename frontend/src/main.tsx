@@ -7,5 +7,6 @@ import './interface-size.css';
 import './sliding-content.css';
 import './mobile-navigation.css';
 import './appearance-motion.css';
+import './liquid-buttons.css';
 
 createRoot(document.getElementById('root')!).render(<App />);

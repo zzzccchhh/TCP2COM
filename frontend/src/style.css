@@ -93,7 +93,7 @@ select { appearance: none; width: 100%; }
 .button.secondary { background: #eeede6; border-color: transparent; }
 .button.secondary:hover:not(:disabled) { background: #e1e2d7; }
 .button.full { width: 100%; }
-.button.full > svg:last-child:not(:first-child) { margin-left: auto; }
+.button.full > svg:last-child:not(:first-of-type) { margin-left: auto; }
 .connection-actions { margin-top: 17px; }
 .connection-actions .primary.full { justify-content: flex-start; padding-left: 14px; height: 38px; }
 .connection-note { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: var(--text-caption); color: #a1a193; padding-top: 12px; line-height: 1.4; }

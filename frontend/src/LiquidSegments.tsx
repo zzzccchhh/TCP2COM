@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import GlassSurface from './GlassSurface';
 import { useLiquidLens } from './useLiquidLens';
+import { useSegmentGeometry } from './useSegmentGeometry';
 
 type Item = { value: string; label: ReactNode; disabled?: boolean };
 type Rect = { left: number; top: number; width: number; height: number };
@@ -14,11 +15,13 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
     const drag = useRef<{ id: number; index: number; startX: number; startY: number; origin: Rect; moved: boolean } | null>(null);
     const sample = useRef({ x: 0, time: 0, velocity: 0 });
     const lens = useRef<HTMLElement | null>(null);
+    const anchor = useRef<HTMLDivElement>(null);
     const motion = useLiquidLens(lens);
     const [visual, setVisual] = useState<Rect>({ left: 3, top: 3, width: 0, height: 0 });
     const [preview, setPreview] = useState(-1);
     const [dragging, setDragging] = useState(false);
     const [pressed, setPressed] = useState(false);
+    const readVisual = useSegmentGeometry(root, anchor, visual, dragging);
     const selected = items.findIndex(item => item.value === value);
     const selectedRef = useRef(selected);
     selectedRef.current = selected;
@@ -38,11 +41,13 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
 
     useLayoutEffect(() => {
         function measure() {
-            if (drag.current) cancel();
             rects.current = buttons.current.slice(0, items.length).map(button => button
                 ? { left: button.offsetLeft, top: button.offsetTop, width: button.offsetWidth, height: button.offsetHeight }
                 : { left: 0, top: 0, width: 0, height: 0 });
+            // Log counters and selected font weights can resize options during a gesture.
+            // Preserve the grab; a stationary press still targets the newly measured option.
             if (!drag.current) restore();
+            else if (!drag.current.moved) setVisual(rects.current[drag.current.index]);
         }
         const observer = new ResizeObserver(measure);
         observer.observe(root.current!);
@@ -82,6 +87,7 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
             const threshold = event.pointerType === 'touch' ? 8 : 5;
             if (Math.abs(dy) > threshold && Math.abs(dy) > Math.abs(dx)) { cancel(); return; }
             if (Math.abs(dx) < threshold) return;
+            current.origin = readVisual();
             current.moved = true;
             setDragging(true);
         }
@@ -147,9 +153,7 @@ export default function LiquidSegments({ label, value, items, onChange, disabled
                 : enabled[(cursor + (event.key === 'ArrowRight' ? 1 : enabled.length - 1)) % enabled.length];
             if (next !== undefined) { buttons.current[next]?.focus(); motion.pulse(travel(next)); if (items[next].value !== value) onChange(items[next].value); }
         }}>
-        <div aria-hidden="true" className="liquid-anchor" style={{
-            width: visual.width, height: visual.height,
-            '--liquid-x': `${visual.left}px`, '--liquid-y': `${visual.top}px`,
+        <div ref={anchor} aria-hidden="true" className="liquid-anchor" style={{
             '--lens-radius': `${visual.height / 2}px`,
         } as CSSProperties}>
             <GlassSurface as="div" surfaceRef={lens} className="liquid-indicator liquid-elastic-lens"><span className="liquid-raised-optics" /><span className="liquid-lens-sheen" /></GlassSurface>

@@ -31,7 +31,7 @@ export function attachLiquidGlass(element: HTMLElement, onReady?: () => void): (
     const id = `liquid-glass-${++sequence}`;
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.classList.add('liquid-glass-defs');
-    const control = element.matches('.liquid-indicator, .liquid-toggle-thumb, .liquid-check-mark');
+    const control = element.matches('.liquid-indicator, .liquid-toggle-thumb, .liquid-check-mark, .liquid-button-material');
     const elastic = element.classList.contains('liquid-elastic-lens');
     svg.dataset.glassKind = control ? 'control' : 'surface';
     svg.setAttribute('width', '0');

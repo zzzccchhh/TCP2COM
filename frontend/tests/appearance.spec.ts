@@ -25,7 +25,7 @@ test('first visit restores original warm colours even on a dark operating system
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(241, 240, 234)');
     await expect(page.locator('body')).toHaveCSS('background-image', 'none');
-    await expect(page.getByRole('button', { name: '启动桥接', exact: true })).toHaveCSS('background-color', 'rgb(41, 42, 37)');
+    await expect(page.getByRole('button', { name: '启动桥接', exact: true }).locator('.liquid-button-material')).toHaveCSS('background-color', 'rgb(41, 42, 37)');
     await page.screenshot({ path: 'test-results/appearance-original-light.png' });
 });
 
