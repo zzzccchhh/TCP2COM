@@ -81,14 +81,16 @@ changes remain live; Enter preserves typed custom values unless the user explici
 navigated a candidate. Label clicks or focus alone do not enable editing.
 
 Menus settle constrained layout and decode their bounded optical map before entry.
-`usePickerMorph` contracts a small contour at the arrow, lifts it clear of the data,
-then expands it in two dimensions into the final rounded menu. Closing reverses
+`useGlassExpansion` directly reveals the menu and LAN popover in two dimensions
+inside their final card bounds, from the edge nearest the trigger. There is no
+separate glass seed at the arrow and no contraction/lift phase. Closing reverses
 the same 380ms timeline; interrupted travel starts at the last painted progress.
 A zero-size Web Animations clock supplies easing and participates in animation
 waits; requestAnimationFrame updates local contour/clip/light properties only.
-The optical sampling surface stays fixed, while contour opacity gradually yields
-to the decoded material. Text is clipped/revealed at native size and never moves
-through the data field. A row highlight uses static glass, without a second
+The optical sampling surface stays fixed; only its clip/opacity and the border-only
+outline change. The outline has no additional background. Border thickness and
+content padding are included when clipping, keeping the shape inside the card.
+Text is clipped/revealed at native size and never moves through the data field. A row highlight uses static glass, without a second
 backdrop filter. Width/height allocation and SVG maps do not change per morph frame.
 Reduced motion or hidden documents settle immediately and release completed exits.
 Overlay ancestors stay opaque so

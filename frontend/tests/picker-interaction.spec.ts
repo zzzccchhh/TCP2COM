@@ -91,35 +91,36 @@ test('label, focus alone and outside dismissal do not start editing or steal foc
     await input.focus(); await expect(input).toHaveJSProperty('readOnly', true);
 });
 
-test('morph starts at the arrow, clears the data, grows in two dimensions and reuses its optical map', async ({ page }) => {
+test('card expands directly within menu bounds and reuses its optical map', async ({ page }) => {
     await ready(page);
     await page.getByRole('button', { name: '选择业务 COM', exact: true }).click();
     const popup = page.locator('.picker-position');
     await expect(popup).toHaveAttribute('data-state', 'open');
     const result = await popup.evaluate(async element => {
-        const glass = element.querySelector<HTMLElement>('.picker-window')!, morph = element.querySelector('.picker-morph')!;
+        const glass = element.querySelector<HTMLElement>('.picker-window')!, morph = element.querySelector('.glass-expansion-outline')!;
         const button = element.querySelector('.picker-list button')!;
         const input = document.querySelector('input[aria-label="业务 COM"]')!.getBoundingClientRect();
         const id = glass.style.getPropertyValue('--glass-refraction').match(/#([^"')]+)/)![1];
         const image = document.getElementById(id)!.querySelector('feImage')!, map = image.getAttribute('href');
-        const frames: { p: number; width: number; height: number; x: number; bottom: number; nativeHeight: number; bitmap: boolean; sampling: string }[] = [];
+        const frames: { p: number; width: number; height: number; x: number; top: number; bottom: number; nativeHeight: number; bitmap: boolean; sampling: string }[] = [];
         const start = performance.now();
         while (performance.now() - start < 450) {
             const rect = morph.getBoundingClientRect();
-            frames.push({ p: Number((element as HTMLElement).style.getPropertyValue('--picker-progress')), width: rect.width, height: rect.height,
-                x: rect.x, bottom: rect.bottom, nativeHeight: button.getBoundingClientRect().height,
+            frames.push({ p: Number((element as HTMLElement).style.getPropertyValue('--expansion-progress')), width: rect.width, height: rect.height,
+                x: rect.x, top: rect.top, bottom: rect.bottom, nativeHeight: button.getBoundingClientRect().height,
                 bitmap: image.getAttribute('href') === map, sampling: getComputedStyle(glass, '::before').transform });
             await new Promise(requestAnimationFrame);
         }
-        return { frames, input: { x: input.x, right: input.right, bottom: input.bottom } };
+        const menu = element.getBoundingClientRect();
+        return { frames, input: { x: input.x, right: input.right, bottom: input.bottom }, menu: { x: menu.x, top: menu.top, bottom: menu.bottom, right: menu.right } };
     });
     expect(result.frames.filter(frame => frame.p > .3 && frame.p < .9).length).toBeGreaterThan(3);
     expect(result.frames.at(-1)!.width).toBeGreaterThan(result.frames[0].width * 3);
     expect(result.frames.at(-1)!.height).toBeGreaterThan(result.frames[0].height * 2);
     expect(result.frames.every(frame => frame.bitmap && frame.sampling === 'none')).toBe(true);
     expect(Math.max(...result.frames.map(frame => frame.nativeHeight)) - Math.min(...result.frames.map(frame => frame.nativeHeight))).toBeLessThan(.01);
-    // Until the contour is clear of the field it stays inside the arrow's end of the input.
-    expect(result.frames.filter(frame => frame.p < .3).every(frame => frame.x > result.input.right - 55)).toBe(true);
+    expect(result.frames.every(frame => frame.top >= result.menu.top - .1 && frame.x >= result.menu.x - .1 && frame.x + frame.width <= result.menu.right + .1 && frame.bottom <= result.menu.bottom + .1)).toBe(true);
+    await expect(popup.locator('.picker-morph')).toHaveCount(0);
 });
 
 test('viewport changes while browsing retain the origin and reduced motion settles an interrupted morph', async ({ page }) => {
@@ -133,6 +134,6 @@ test('viewport changes while browsing retain the origin and reduced motion settl
     await page.keyboard.press('Escape');
     await page.emulateMedia({ reducedMotion: 'reduce' }); await expect(popup).toHaveCount(0);
     await arrow.click(); await expect(popup).toHaveAttribute('data-state', 'open');
-    expect(await popup.evaluate(element => Number((element as HTMLElement).style.getPropertyValue('--picker-progress')))).toBe(1);
+    expect(await popup.evaluate(element => Number((element as HTMLElement).style.getPropertyValue('--expansion-progress')))).toBe(1);
     await page.keyboard.press('Escape'); await expect(popup).toHaveCount(0);
 });

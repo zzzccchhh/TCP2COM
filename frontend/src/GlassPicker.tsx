@@ -5,8 +5,8 @@ import { Check, ChevronDown } from 'lucide-react';
 import GlassSurface from './GlassSurface';
 import { usePresence } from './usePresence';
 import { useExitBounds } from './useExitBounds';
-import { usePickerMorph } from './usePickerMorph';
-import type { PickerOrigin } from './usePickerMorph';
+import { useGlassExpansion } from './useGlassExpansion';
+import type { ExpansionOrigin } from './useGlassExpansion';
 
 type Props = {
     label: string; value: string | number; onChange: (value: string) => void;
@@ -21,7 +21,7 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
     const listbox = useRef<HTMLDivElement>(null);
     const wrap = useRef<HTMLSpanElement>(null);
     const toggle = useRef<HTMLButtonElement>(null);
-    const origin = useRef<PickerOrigin>({ x: 0, y: 0, size: 32, upwards: false });
+    const origin = useRef<ExpansionOrigin>({ x: 0, upwards: false });
     const optionNodes = useRef<(HTMLButtonElement | null)[]>([]);
     const [open, setOpen] = useState(false);
     const [positioned, setPositioned] = useState(false);
@@ -38,7 +38,7 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
     const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
     const [highlight, setHighlight] = useState({ top: 0, height: 0 });
     const editable = !!list;
-    usePickerMorph(popup, origin, presence.present, presence.entered, open && prepared, position, presence.finishExit);
+    useGlassExpansion(popup, origin, presence.present, presence.entered, open && prepared, position, presence.finishExit);
     const entries: [string | number, string][] = options ?? (list
         ? Array.from((document.getElementById(list) as HTMLDataListElement | null)?.options ?? []).map(option => [option.value,
             option.label && option.label !== option.value ? `${option.value} · ${option.label}` : option.value])
@@ -108,9 +108,8 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             const height = Math.min(popup.current?.offsetHeight || maxHeight, maxHeight);
             const top = upwards ? rect.top - height - 7 : rect.bottom + 7;
             const source = editable ? toggle.current?.getBoundingClientRect() : null;
-            const size = Math.min(source?.height ?? rect.height, source?.width ?? rect.height) * .82;
             origin.current = { x: (source ? source.left + source.width / 2 : rect.right - rect.height / 2) - left,
-                y: rect.top + rect.height / 2 - top, size, upwards };
+                upwards };
             setPosition({ left, top, width, maxHeight, '--picker-edge': upwards ? '100%' : '0%',
                 '--picker-clip-top': upwards ? '100%' : '0%', '--picker-clip-bottom': upwards ? '0%' : '100%',
             } as CSSProperties);
@@ -222,11 +221,11 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
         {presence.present && createPortal(<div ref={element => { popup.current = element; }} className="picker-position"
             style={position} data-state={presence.entered ? 'open' : 'closed'} data-ready={prepared || undefined}
             aria-hidden={!open || undefined} inert={!open}>
-            <span className="picker-motion-clock" aria-hidden="true" />
-            <div className="picker-morph" aria-hidden="true" />
+            <span className="glass-expansion-clock" aria-hidden="true" />
+            <div className="glass-expansion-outline" aria-hidden="true" />
             <GlassSurface className="picker-window" aria-label={`${label}选项`} opticsEnabled={positioned}
                 onGlassReady={() => setOpticsReady(true)}>
-                <div className="picker-content">
+                <div className="picker-content glass-expansion-content">
                     <div className="picker-heading">{label}</div>
                     <div ref={listbox} className="picker-list" role="listbox" id={id} aria-label={`${label}选项`}
                         tabIndex={editable ? -1 : undefined} aria-activedescendant={open && shown[active] ? `${id}-${active}` : undefined} onKeyDown={keyboard}>

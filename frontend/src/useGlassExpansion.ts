@@ -1,13 +1,12 @@
 import { useLayoutEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 
-export type PickerOrigin = { x: number; y: number; size: number; upwards: boolean };
+export type ExpansionOrigin = { x: number; upwards: boolean };
 const clamp = (value: number, low = 0, high = 1) => Math.max(low, Math.min(high, value));
 const mix = (a: number, b: number, amount: number) => a + (b - a) * amount;
-const smooth = (value: number) => value * value * (3 - 2 * value);
 
-/** Only the contour moves. The cached optical sheet and native-size text stay at their final allocation. */
-export function usePickerMorph(element: RefObject<HTMLElement | null>, origin: RefObject<PickerOrigin>,
+/** The card reveals directly from its nearest edge. The cached optical sheet and native-size text stay at their final allocation. */
+export function useGlassExpansion(element: RefObject<HTMLElement | null>, origin: RefObject<ExpansionOrigin>,
     present: boolean, entered: boolean, requested: boolean, layout: unknown, finishExit: () => void) {
     const progress = useRef(0);
     const driver = useRef<{ animation: Animation; from: number; to: number } | null>(null);
@@ -27,27 +26,25 @@ export function usePickerMorph(element: RefObject<HTMLElement | null>, origin: R
         const node = element.current;
         if (!node) return;
         progress.current = clamp(amount);
-        const p = progress.current, { x, y, size, upwards } = origin.current;
-        const width = node.offsetWidth, height = node.offsetHeight;
+        const p = progress.current, { x, upwards } = origin.current;
+        const width = node.clientWidth, height = node.clientHeight;
         if (!width || !height) return;
-        const seed = Math.min(size, width, height);
-        // A small contraction, a lift clear of the data, then a rounded expansion.
-        const lift = smooth(clamp((p - .1) / .2));
-        const growth = smooth(clamp((p - .3) / .7));
-        const small = seed * (p < .1 ? mix(1, .88, p / .1) : mix(.88, 1, lift));
-        const edgeX = clamp(x, seed / 2, width - seed / 2);
-        const edgeY = upwards ? height - seed / 2 : seed / 2;
-        const w = mix(small, width, growth), h = mix(small, height, growth);
-        const left = mix(mix(x, edgeX, lift) - small / 2, 0, growth);
-        const top = mix(mix(y, edgeY, lift) - small / 2, 0, growth);
-        const radius = mix(small / 2, 26, growth);
-        const clip = `${clamp(top / height) * 100}% ${clamp((width - left - w) / width) * 100}% ${clamp((height - top - h) / height) * 100}% ${clamp(left / width) * 100}%`;
+        // Reveal only inside the final card. No seed, lift, or second glass under the trigger.
+        const edgeX = clamp(x, 0, width);
+        const w = width * p, h = height * p;
+        const left = edgeX * (1 - p), top = upwards ? height - h : 0;
+        const radius = Math.min(26, w / 2, h / 2);
+        const clip = `${top / height * 100}% ${(width - left - w) / width * 100}% ${(height - top - h) / height * 100}% ${left / width * 100}%`;
+        const content = node.querySelector<HTMLElement>('.glass-expansion-content');
+        const bounds = node.getBoundingClientRect(), text = content?.getBoundingClientRect();
+        const baseX = bounds.left + node.clientLeft, baseY = bounds.top + node.clientTop;
+        const textClip = text ? `inset(${Math.max(0, baseY + top - text.top)}px ${Math.max(0, text.right - baseX - left - w)}px ${Math.max(0, text.bottom - bounds.top - top - h)}px ${Math.max(0, baseX + left - text.left)}px)` : 'inset(0)';
         const values: Record<string, string> = {
-            '--picker-progress': String(p), '--picker-shape-x': `${left}px`, '--picker-shape-y': `${top}px`,
-            '--picker-shape-width': `${w}px`, '--picker-shape-height': `${h}px`, '--picker-shape-radius': `${radius}px`,
-            '--picker-sheet-clip': `inset(${clip} round ${radius}px)`, '--picker-content-clip': `inset(${clip})`,
-            '--picker-sheet-opacity': String(clamp((p - .2) / .8)),
-            '--picker-text-opacity': String(clamp((p - .28) / .6)),
+            '--expansion-progress': String(p), '--expansion-shape-x': `${left}px`, '--expansion-shape-y': `${top}px`,
+            '--expansion-shape-width': `${w}px`, '--expansion-shape-height': `${h}px`, '--expansion-shape-radius': `${radius}px`,
+            '--expansion-sheet-clip': `inset(${clip} round ${radius}px)`, '--expansion-content-clip': p === 1 ? 'inset(0)' : textClip,
+            '--expansion-sheet-opacity': String(p),
+            '--expansion-text-opacity': String(clamp(p / .8)),
         };
         Object.entries(values).forEach(([key, value]) => node.style.setProperty(key, value));
     }
@@ -72,7 +69,7 @@ export function usePickerMorph(element: RefObject<HTMLElement | null>, origin: R
         if (Math.abs(current - target) < .001 || document.hidden || matchMedia('(prefers-reduced-motion: reduce)').matches) {
             settle(); return;
         }
-        const clock = element.current!.querySelector<HTMLElement>('.picker-motion-clock')!;
+        const clock = element.current!.querySelector<HTMLElement>('.glass-expansion-clock')!;
         // The zero-size clock supplies the browser's easing/timeline and participates in animation waits.
         const animation = clock.animate([{ opacity: 0 }, { opacity: 1 }], {
             duration: 380 * Math.abs(target - current), easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'both',

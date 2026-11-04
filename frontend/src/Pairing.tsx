@@ -6,6 +6,8 @@ import LiquidButton from './LiquidButton';
 import { usePresence } from './usePresence';
 import { useExitBounds } from './useExitBounds';
 import { useReturnFocus } from './useReturnFocus';
+import { useGlassExpansion } from './useGlassExpansion';
+import type { ExpansionOrigin } from './useGlassExpansion';
 import { autoConnect, defaultTerminalName, disconnect, getLANStatus, isLAN, normalizeAddress, retryConnection, serviceAddress } from './lan';
 
 export default function Pairing() {
@@ -16,8 +18,35 @@ export default function Pairing() {
     const panel = useRef<HTMLElement>(null);
     const trigger = useRef<HTMLButtonElement>(null);
     const panelId = useId();
+    const origin = useRef<ExpansionOrigin>({ x: 0, upwards: false });
+    const [geometry, setGeometry] = useState('');
+    // Measure only while open; closing keeps the last origin and frozen rectangle.
+    useLayoutEffect(() => {
+        if (!open || !panelMotion.present) return;
+        function measure() {
+            const node = panel.current, button = trigger.current;
+            if (!node || !button) return;
+            const card = node.getBoundingClientRect(), source = button.getBoundingClientRect();
+            origin.current = { x: source.left + source.width / 2 - card.left,
+                upwards: source.top + source.height / 2 > card.top + card.height / 2 };
+            setGeometry(`${origin.current.x}:${origin.current.upwards}:${card.width}:${card.height}`);
+        }
+        measure();
+        const observer = new ResizeObserver(measure);
+        if (panel.current) observer.observe(panel.current);
+        if (trigger.current) observer.observe(trigger.current);
+        window.addEventListener('resize', measure);
+        window.addEventListener('scroll', measure, true);
+        window.visualViewport?.addEventListener('resize', measure);
+        window.visualViewport?.addEventListener('scroll', measure);
+        return () => {
+            observer.disconnect(); window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure, true);
+            window.visualViewport?.removeEventListener('resize', measure); window.visualViewport?.removeEventListener('scroll', measure);
+        };
+    }, [open, panelMotion.present]);
     useExitBounds(open, panelMotion.present, panel);
     useReturnFocus(panelMotion.present, trigger);
+    useGlassExpansion(panel, origin, panelMotion.present, panelMotion.entered, open && opticsReady, geometry, panelMotion.finishExit);
     useLayoutEffect(() => {
         if (!panelMotion.present) { setOpticsReady(false); setClosingContent(null); }
     }, [panelMotion.present]);
@@ -77,12 +106,10 @@ export default function Pairing() {
         {status.state !== 'idle' && <span className={`lan-connection-state ${status.state}`} role="status" aria-label="服务连接状态">{status.state === 'connected' ? '服务已连接' : status.message}</span>}
         {panelMotion.present && <GlassSurface surfaceRef={panel} className="panel lan-panel liquid-popover" aria-label="局域网连接"
             id={panelId} data-ready={opticsReady || undefined} onGlassReady={() => setOpticsReady(true)}
-            data-state={panelMotion.entered ? 'open' : 'closed'} aria-hidden={!open || undefined} inert={!open}
-            onTransitionEnd={event => {
-                if (!open && event.target === event.currentTarget && event.pseudoElement === '::before'
-                    && event.propertyName === 'clip-path') panelMotion.finishExit();
-            }}>
-            <div className="popover-content">{open ? content : closingContent ?? content}</div>
+            data-state={panelMotion.entered ? 'open' : 'closed'} aria-hidden={!open || undefined} inert={!open}>
+            <span className="glass-expansion-clock" aria-hidden="true" />
+            <div className="glass-expansion-outline" aria-hidden="true" />
+            <div className="popover-content glass-expansion-content">{open ? content : closingContent ?? content}</div>
         </GlassSurface>}
     </div>;
 }
