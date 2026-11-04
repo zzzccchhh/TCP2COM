@@ -149,7 +149,8 @@ for (const width of [1440, 390]) {
         ]) {
             await page.getByRole('button', { name: '局域网连接', exact: true }).click();
             await page.getByRole('button', { name: button, exact: true }).click();
-            const dialog = page.getByRole('dialog', { name: title, exact: true });
+            const mobilePage = width <= 760 && ['设备配置面板', '链路诊断'].includes(title);
+            const dialog = page.getByRole(mobilePage ? 'region' : 'dialog', { name: title, exact: true });
             await expect(dialog).toBeVisible();
             await page.evaluate(() => window.scrollTo(0, 0));
             // Test actual hit targets where the header content would otherwise obscure the drawer.
@@ -165,7 +166,7 @@ for (const width of [1440, 390]) {
             })).toBe(true);
             if (title === '远程复位') await dialog.getByLabel('设备 IPv4 地址', { exact: true }).fill('192.168.4.1');
             await page.screenshot({ path: `test-results/drawer-${width}-${title}.png`, animations: 'disabled' });
-            await dialog.getByRole('button', { name: '关闭面板', exact: true }).click();
+            await dialog.getByRole('button', { name: mobilePage ? '返回工作台' : '关闭面板', exact: true }).click();
             await expect(dialog).not.toBeVisible();
             await page.getByRole('button', { name: '局域网连接', exact: true }).click();
         }

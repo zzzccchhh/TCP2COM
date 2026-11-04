@@ -106,3 +106,17 @@ rim instead of a second rectangular outline that touch Chromium could refract.
 
 No CDN, remote image or runtime download is required. Update this commit and
 recheck the browser/WebView2 rendering when changing the upstream implementation.
+
+Phone config and diagnostics use a full-width child page instead of the touch
+drawer reveal. `useMobilePage` records a small namespaced history state entry
+without changing the URL, restores the level on reload and handles back/forward.
+Back first dismisses a picker or save confirmation; fast returns/reopens serialize
+history traversal without adding duplicate entries. The retained home and child
+page translate in opposite directions for 320ms, without scaling, clipping or a
+blur shade. Large background optics stay static; small controls inside the child
+page retain their existing optics. Layout mode is captured on entry so rotation
+does not turn an open page into a drawer. A fixed body preserves home scroll;
+visualViewport events size the child to keyboard/rotation changes, safe-area
+padding protects its header/footer, and exit restores scroll and entry focus.
+Reduced motion disables travel and releases an exiting page immediately. Wider
+layouts and reset/help overlays keep their original presentation.

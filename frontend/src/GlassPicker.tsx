@@ -90,6 +90,7 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); close(); }
         }
         function other(event: Event) { if ((event as CustomEvent).detail !== id) close(); }
+        function navigationBack(event: Event) { if (open) { event.preventDefault(); close(); trigger.current?.focus({ preventScroll: true }); } }
         function scroll(event: Event) { if (!popup.current?.contains(event.target as Node)) place(); }
         place();
         const observer = new ResizeObserver(place);
@@ -103,6 +104,7 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
         document.addEventListener('keydown', escape, true);
         window.addEventListener('glass-picker-open', other);
         window.addEventListener('workspace-overlay-change', close);
+        window.addEventListener('mobile-page-back', navigationBack);
         return () => {
             observer.disconnect();
             window.removeEventListener('resize', place);
@@ -113,6 +115,7 @@ export default function GlassPicker({ label, value, onChange, options, list, dis
             document.removeEventListener('keydown', escape, true);
             window.removeEventListener('glass-picker-open', other);
             window.removeEventListener('workspace-overlay-change', close);
+            window.removeEventListener('mobile-page-back', navigationBack);
         };
     }, [presence.present, open, id]);
     useLayoutEffect(() => {

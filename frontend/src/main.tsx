@@ -5,5 +5,6 @@ import './liquid-glass.css';
 import './liquid-controls.css';
 import './interface-size.css';
 import './sliding-content.css';
+import './mobile-navigation.css';
 
 createRoot(document.getElementById('root')!).render(<App />);

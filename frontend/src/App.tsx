@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-    Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, Check, CircleHelp,
+    Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, Check, ChevronLeft, CircleHelp,
     Cable, Download, FileJson, History, Info, LoaderCircle, Network, Pause, Play,
     Radio, RefreshCw, RotateCcw, Search, Settings2, ShieldCheck, SlidersHorizontal,
     Square, Terminal, Trash2, Unplug, Usb, Wifi, X, Zap,
@@ -17,6 +17,8 @@ import Toggle from './LiquidToggle';
 import LiquidDisclosure from './LiquidDisclosure';
 import { usePresence } from './usePresence';
 import { useReturnFocus } from './useReturnFocus';
+import { useMobilePage, useMobilePageViewport } from './useMobilePage';
+import type { Drawer } from './useMobilePage';
 import { getLANStatus, isLAN } from './lan';
 import { chooseAppearance, useAppearance } from './appearance';
 
@@ -74,20 +76,30 @@ export default function App() {
     const [autoscroll, setAutoscroll] = useState(true);
     const [toast, setToast] = useState('');
     const [working, setWorking] = useState(false);
-    const [drawer, setDrawer] = useState<'config' | 'diagnostics' | 'reset' | 'help' | null>(null);
+    const [drawer, setDrawerValue] = useState<Drawer | null>(null);
     const [config, setConfig] = useState<Data>(deviceDefaults('c5'));
     const [drafts, setDrafts] = useState<Data>({});
     const [configTab, setConfigTab] = useState('common');
     const [passwords, setPasswords] = useState<Data>({ ap: '', pc: '', shared: '' });
     const [clear, setClear] = useState<string[]>([]);
     const [confirm, setConfirm] = useState<Data | null>(null);
-    const drawerMotion = usePresence(drawer);
+    const { mobile: mobilePage, navigate: setDrawer, trigger: pageTrigger } = useMobilePage(drawer, setDrawerValue, !!confirm, () => setConfirm(null));
+    const drawerMotion = usePresence(drawer, mobilePage ? 320 : 380);
     const confirmMotion = usePresence(confirm);
     const overlayPresent = drawerMotion.present || confirmMotion.present;
-    useReturnFocus(drawerMotion.present);
+    const mobilePresent = mobilePage && drawerMotion.present;
+    useMobilePageViewport(mobilePresent);
+    useReturnFocus(drawerMotion.present, pageTrigger);
     useReturnFocus(confirmMotion.present);
     const shownDrawer = drawerMotion.value;
     const shownConfirm = confirmMotion.value;
+    useEffect(() => {
+        if (!mobilePage) return;
+        const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+        const finish = () => { if (reduced.matches) drawerMotion.finishExit(); };
+        reduced.addEventListener('change', finish);
+        return () => reduced.removeEventListener('change', finish);
+    }, [mobilePage, drawerMotion.finishExit]);
     const [resetHost, setResetHost] = useState('');
     const [resetPort, setResetPort] = useState('8081');
     const [samples, setSamples] = useState<number[][]>([]);
@@ -180,7 +192,7 @@ export default function App() {
         function key(event: KeyboardEvent) { if (event.key === 'Escape') { if (confirmMotion.present) setConfirm(null); else setDrawer(null); } }
         window.addEventListener('keydown', key);
         return () => window.removeEventListener('keydown', key);
-    }, [confirmMotion.present]);
+    }, [confirmMotion.present, setDrawer]);
     useEffect(() => { window.dispatchEvent(new Event('workspace-overlay-change')); }, [drawer, confirm]);
     useEffect(() => {
         if (!overlayPresent) return;
@@ -316,11 +328,12 @@ export default function App() {
         Object.keys(snap.baseline).some(key => !['revision', 'saved_revision', 'unsaved', 'migration_requires_setup', 'config_source', 'config_api'].includes(key)
             && JSON.stringify(snap.baseline[key]) !== JSON.stringify(config[key])));
 
-    return <div className="app-shell">
+    return <div className="app-shell" data-mobile-page={mobilePresent || undefined}>
+        <div className="primary-page" data-navigation={mobilePresent ? drawerMotion.entered ? 'open' : 'closed' : undefined} aria-hidden={mobilePresent || undefined} inert={mobilePresent}>
         <header className="masthead">
             <div className="brand"><span className="brand-mark"><Wifi size={23} strokeWidth={1.7} /></span><div><strong>Wi-Fi Bridge<span className="brand-period">.</span></strong><small>WIRELESS SERIAL WORKSPACE</small></div></div>
             <div className="header-right"><Pairing /><span className="local-indicator"><ShieldCheck size={14} />{isLAN() ? '局域网已配对' : native ? '本地运行' : '界面预览'}</span>
-                <span className="header-divider" /><button className="icon-button" title="使用帮助" aria-label="使用帮助" onClick={() => setDrawer('help')}><CircleHelp size={19} /></button>
+                <span className="header-divider" /><button className="icon-button" title="使用帮助" aria-label="使用帮助" onClick={event => setDrawer('help', event.currentTarget)}><CircleHelp size={19} /></button>
                 <span className="version">DESKTOP / 1.0</span></div>
         </header>
 
@@ -412,7 +425,7 @@ export default function App() {
                 <GlassSurface className="panel usb-panel"><div className="panel-title"><span><Usb size={17} />USB 连接</span><Badge active={usbOnline} warning={usbActive && !usbOnline}>{snap.usb?.closing ? '关闭中' : usbOnline ? '已连接' : usbActive ? '重试中' : '未连接'}</Badge></div>
                     {caps ? <><div className="form-stack">{field('usb_port', '原生 USB COM', { list: 'serial-ports', disabled: waiting })}</div>
                         <button className={`button full ${usbActive ? '' : 'secondary'}`} disabled={working || snap.busy || (snap.config_busy && !usbActive)} onClick={() => run(() => call('usb', !usbActive))}>{usbActive ? <Unplug size={15} /> : <Usb size={15} />}{usbActive ? '断开 USB' : '连接 USB'}</button>
-                        <div className="usb-caption"><span>独立于业务桥接</span><button className="text-button" onClick={() => setDrawer('diagnostics')}>诊断<ArrowUpRight size={12} /></button></div></> : <p className="muted small-copy">ESP-01S 使用业务串口和网络连接。</p>}
+                        <div className="usb-caption"><span>独立于业务桥接</span><button className="text-button" onClick={event => setDrawer('diagnostics', event.currentTarget)}>诊断<ArrowUpRight size={12} /></button></div></> : <p className="muted small-copy">ESP-01S 使用业务串口和网络连接。</p>}
                 </GlassSurface>
 
                 <GlassSurface className="panel device-panel"><div className="panel-title"><span><Settings2 size={17} />设备配置</span><span className="section-number">02</span></div>
@@ -425,32 +438,33 @@ export default function App() {
                         </SlidingContent>
                         <div className="device-facts"><div><span>业务接口</span><strong>{snap.baseline ? (linkOptions.find(([value]) => value === snap.baseline.link_mode)?.[1] ?? '接口已移除') : '—'}</strong></div><div><span>联网模式</span><strong>{snap.baseline ? ['自建热点 AP', '电脑热点 STA', '共享 Wi-Fi STA'][snap.baseline.mode] : '—'}</strong></div></div>
                         <button className="button secondary full" disabled={waiting} onClick={() => run(readConfig)}>{working ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}读取设备配置</button>
-                        <button className="button full" onClick={() => setDrawer('config')}><SlidersHorizontal size={14} />打开配置面板<ArrowRight size={14} /></button>
+                        <button className="button full" onClick={event => setDrawer('config', event.currentTarget)}><SlidersHorizontal size={14} />打开配置面板<ArrowRight size={14} /></button>
                         <p className="setup-note"><Info size={12} /><span>配网：{device === 'c5' ? 'Key' : 'GPIO4'} 长按 3 秒进入配网。</span></p>
                     </> : <p className="setup-note">ESP-01S 保留透传和远程复位功能。</p>}
                 </GlassSurface>
 
-                <GlassSurface className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><button className="icon-button" title="打开远程复位" aria-label="打开远程复位" onClick={() => { setResetHost(settings.host || ''); setDrawer('reset'); }}><ArrowUpRight size={18} /></button></GlassSurface>
+                <GlassSurface className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><button className="icon-button" title="打开远程复位" aria-label="打开远程复位" onClick={event => { setResetHost(settings.host || ''); setDrawer('reset', event.currentTarget); }}><ArrowUpRight size={18} /></button></GlassSurface>
             </aside>
         </main>
 
         <GlassSurface className="metrics-strip" aria-label="桥接统计">
             {rates.map((rate, index) => <div className="metric" key={index}><span className="metric-label">{index === 0 ? <ArrowDownLeft size={14} /> : index === 1 ? <Cable size={14} /> : <ArrowUpRight size={14} />}{['网络接收', 'COM 写入', '网络发送'][index]}</span><strong>{size(rate, true)}</strong><small>{['来自 Wi-Fi 链路', '交付本地串口', '发往 Wi-Fi 链路'][index]}</small></div>)}
             <div className="metric"><span className="metric-label"><History size={14} />待写队列</span><strong>{size(snap.queued)}</strong><small>峰值 {size(snap.peak)}</small></div>
-            <div className={`metric ${dropped ? 'has-warning' : ''}`}><span className="metric-label"><Activity size={14} />累计丢弃</span><strong>{size(dropped)}</strong><button className="text-button" onClick={() => setDrawer('diagnostics')}>查看链路诊断<ArrowUpRight size={11} /></button></div>
+            <div className={`metric ${dropped ? 'has-warning' : ''}`}><span className="metric-label"><Activity size={14} />累计丢弃</span><strong>{size(dropped)}</strong><button className="text-button" onClick={event => setDrawer('diagnostics', event.currentTarget)}>查看链路诊断<ArrowUpRight size={11} /></button></div>
         </GlassSurface>
         <footer className="page-footer"><span><Check size={12} />{native ? snap.state_status : '本地工具 · 数据留在你的电脑'}</span><span>ESP-01S / ESP32-C5 / ESP32-S3</span></footer>
+        </div>
 
         <datalist id="serial-ports">{ports.map(port => <option key={port.device} value={port.device}>{port.description}</option>)}</datalist>
         <datalist id="baud-rates">{[9600, 115200, 460800, 921600, 1152000, 2000000, 3000000].map(value => <option key={value} value={value} />)}</datalist>
 
-        {shownDrawer && <div className="drawer-backdrop liquid-overlay" data-state={drawerMotion.entered ? 'open' : 'closed'} aria-hidden={!drawer || undefined} inert={!drawer} onClick={() => { if (!confirm) setDrawer(null); }}>
+        {shownDrawer && <div className={`drawer-backdrop liquid-overlay ${mobilePage ? 'mobile-page-layer' : ''}`} data-state={drawerMotion.entered ? 'open' : 'closed'} aria-hidden={!drawer || undefined} inert={!drawer} onClick={() => { if (!confirm && !mobilePage) setDrawer(null); }}>
             <div className="overlay-shade" aria-hidden="true" />
-            <GlassSurface className={`drawer ${shownDrawer === 'config' ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={{ config: '设备配置面板', diagnostics: '链路诊断', reset: '远程复位', help: '使用帮助' }[shownDrawer]} onClick={e => e.stopPropagation()}
+            <GlassSurface className={`drawer ${shownDrawer === 'config' ? 'wide' : ''} ${mobilePage ? 'mobile-secondary-page' : ''}`} opticsEnabled={!mobilePage} role={mobilePage ? 'region' : 'dialog'} aria-modal={mobilePage ? undefined : true} aria-label={{ config: '设备配置面板', diagnostics: '链路诊断', reset: '远程复位', help: '使用帮助' }[shownDrawer]} onClick={e => e.stopPropagation()}
                 onTransitionEnd={event => {
                     if (!drawer && event.target === event.currentTarget && ['transform', 'clip-path'].includes(event.propertyName)) drawerMotion.finishExit();
                 }}>
-            <div className="drawer-heading"><div><div className="eyebrow">{shownDrawer === 'config' ? 'DEVICE CONFIGURATION' : shownDrawer === 'diagnostics' ? 'LINK DIAGNOSTICS' : shownDrawer === 'reset' ? 'REMOTE RESET' : 'QUICK START'}</div><h2>{{ config: `${labels[device]} 设备配置`, diagnostics: '链路诊断', reset: '远程复位', help: '开始使用工作台' }[shownDrawer]}</h2></div><button className="icon-button" aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20} /></button></div>
+            <div className="drawer-heading">{mobilePage && <button className="page-back" aria-label="返回工作台" onClick={() => setDrawer(null)}><ChevronLeft size={22} />返回</button>}<div><div className="eyebrow">{shownDrawer === 'config' ? 'DEVICE CONFIGURATION' : shownDrawer === 'diagnostics' ? 'LINK DIAGNOSTICS' : shownDrawer === 'reset' ? 'REMOTE RESET' : 'QUICK START'}</div><h2>{{ config: `${labels[device]} 设备配置`, diagnostics: '链路诊断', reset: '远程复位', help: '开始使用工作台' }[shownDrawer]}</h2></div>{!mobilePage && <button className="icon-button" aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20} /></button>}</div>
             <div className="drawer-body">
                 {shownDrawer === 'config' && <>
                     <div className="notice"><Info size={16} /><span>{snap.config_status}{!snap.baseline && '。保存前必须从当前设备重新读取。'}</span></div>

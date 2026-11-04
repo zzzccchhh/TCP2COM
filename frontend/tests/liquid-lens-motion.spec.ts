@@ -132,8 +132,8 @@ for (const [width, height, touch] of [[1440, 1000, false], [1024, 1366, true], [
             }
             await page.screenshot({ path: `test-results/enlarged-workspace-${width}.png` });
             await config.click();
-            await expect(page.getByRole('dialog', { name: '设备配置面板', exact: true })).toBeVisible();
-            await page.getByRole('button', { name: '关闭面板', exact: true }).click();
+            await expect(page.getByRole(width <= 760 ? 'region' : 'dialog', { name: '设备配置面板', exact: true })).toBeVisible();
+            await page.getByRole('button', { name: width <= 760 ? '返回工作台' : '关闭面板', exact: true }).click();
             await expect(page.locator('.drawer-backdrop')).toHaveCount(0);
             const metrics = page.getByLabel('桥接统计', { exact: true });
             await metrics.scrollIntoViewIfNeeded(); await expect(metrics).toBeInViewport();

@@ -37,7 +37,7 @@ for (const width of [1440, 960, 390]) {
         await expect(page.getByLabel('当前设备')).toBeVisible();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await page.getByRole('button', { name: '打开配置面板' }).click();
-        const dialog = page.getByRole('dialog', { name: '设备配置面板' });
+        const dialog = page.getByRole(width <= 760 ? 'region' : 'dialog', { name: '设备配置面板' });
         await expect(dialog).toBeVisible();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await dialog.getByRole('button', { name: '共享 Wi-Fi' }).click();
