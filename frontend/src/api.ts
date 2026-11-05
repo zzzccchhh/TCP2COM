@@ -13,6 +13,7 @@ export const defaults: Data = {
     parity: 'N', stopbits: '1', flow: 'none', timeout: '0.02', write_timeout: '2', reconnect: '2',
     connect_timeout: '4', keepalive_idle: '3', keepalive_interval: '1', keepalive_count: '5',
     bufsize: '65536', stats_interval: '0.25', control_port: '8081', no_reset_ui: false, verbose: false,
+    net_log_host: '', net_log_port: '8082',
     usb_port: '', usb_baud: '115200', usb_log: '', config_transport: 'usb', config_url: 'http://192.168.4.1/',
 };
 
@@ -32,7 +33,7 @@ export function deviceDefaults(device: string): Data {
 export const emptySnapshot: Data = {
     state: '已停止', running: false, connected: false, busy: false, running_settings: null,
     applied: false, valid: true, address: '业务桥接已停止', rates: [0, 0, 0], stats: {},
-    queued: 0, peak: 0, usb: null, config_busy: false, config_status: '尚未读取设备', baseline: null,
+    queued: 0, peak: 0, usb: null, net_log: null, config_busy: false, config_status: '尚未读取设备', baseline: null,
     epoch: 0, state_status: '设置会自动记住；连接需手动启动', log_dropped: 0, logs: [], cursor: 0,
     log_generation: 0, reset: { count: 0, busy: false, message: '3 秒内连续点击 5 次，复位外部主控' },
 };
@@ -50,7 +51,7 @@ export function applyDraft(base: Data, draft: Data, device: string): Data {
     Object.entries(draft).forEach(([group, fields]) => {
         if (group === 'pc' || group === 'shared') result[group] = { ...result[group], ...fields };
         else Object.entries(fields).forEach(([key, value]) => {
-            result[key] = typeof schema[key] === 'number' && typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+            result[key] = (key === 'log_port' || typeof schema[key] === 'number') && typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
         });
     });
     if (device === 'c5' && [1, 2].includes(Number(result.link_mode))) result.link_mode = -1;

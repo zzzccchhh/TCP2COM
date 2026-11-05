@@ -15,7 +15,7 @@ from web_service import WebService
 from lan_preferences import DEFAULT_PATH, Preferences, startup_settings
 
 BASE = Path(__file__).resolve().parent
-METHODS = frozenset("initial ports poll update_settings bridge usb remember_draft read_device preview_save save_device import_config backup_config clear_logs export_logs reset_click peers revoke".split())
+METHODS = frozenset("initial ports poll update_settings bridge usb network_log remember_draft read_device preview_save save_device import_config backup_config clear_logs export_logs reset_click peers revoke".split())
 READS = frozenset("initial ports poll peers export_logs".split())
 
 

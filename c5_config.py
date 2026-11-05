@@ -24,6 +24,7 @@ TOP_FIELDS = ("link_mode", "mode", "band", "baud", "tcp_port", "ap_channel",
 NETWORK_FIELDS = ("net_role", "auto_reconnect", "remote_ip", "remote_port", "local_port",
                   "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb")
 CONFIG_APIS = {"c5": ("c5-config-2", "c5-wbr-1"), "s3": ("bridge-1",)}
+LOG_FIELDS = ("log_enabled", "log_port")
 STATION_FIELDS = ("ssid", "static_ip", "ip", "gateway", "netmask", "dns")
 
 
@@ -44,6 +45,9 @@ def public_config(document, device="c5"):
     for key in NETWORK_FIELDS:
         if key in document:
             result[key] = copy.deepcopy(document[key])
+    if device == "c5":
+        for key in LOG_FIELDS:
+            if key in document: result[key] = copy.deepcopy(document[key])
     api = document.get("config_api")
     if api is not None:
         if api not in CONFIG_APIS.get(device, ()):
@@ -125,6 +129,13 @@ def _validate_link_mode(value, device):
 
 
 def validate_config(config, device="c5"):
+    if "log_enabled" in config or "log_port" in config:
+        if device != "c5" or type(config.get("log_enabled")) is not bool or type(config.get("log_port")) is not int or not 1024 <= config["log_port"] <= 65535:
+            raise ConfigError("网络日志开关或端口无效（1024～65535）")
+        if config["log_enabled"] and (config["log_port"] == 8081 or
+                (config.get("net_role", 0) == 0 and config["log_port"] == config["tcp_port"]) or
+                (config.get("net_role") == 1 and config["log_port"] == config.get("local_port"))):
+            raise ConfigError("网络日志端口与本机 TCP 端口冲突")
     _validate_link_mode(config.get("link_mode"), device)
     for key, low, high in (("mode", 0, 2), ("band", 0, 2),
                            ("baud", 9600, 5000000), ("tcp_port", 1024, 65535), ("ap_channel", 1, 165)):
@@ -205,7 +216,10 @@ def changed_config(baseline, edited, passwords=None, clear_passwords=(), device=
         raise ConfigError("SPI传输需要升级 C5 固件并重新读取设备")
     if device == "s3" and candidate["link_mode"] == 0 and base["link_mode"] != 0 and "reset_pin" not in base:
         raise ConfigError("无法确认旧版 S3 固件支持原始串口，请更新固件并重新读取")
-    patch = {key: candidate[key] for key in TOP_FIELDS + NETWORK_FIELDS + ("reset_pin", "flow_pin")
+    for key in LOG_FIELDS:
+        if key in candidate and key not in base:
+            raise ConfigError("设备未报告网络日志配置，请更新固件并重新读取")
+    patch = {key: candidate[key] for key in TOP_FIELDS + NETWORK_FIELDS + LOG_FIELDS + ("reset_pin", "flow_pin")
              if key in candidate and candidate[key] != base.get(key)}
     if device == "c5" and "flow_pin" in candidate and "flow_pin" not in base:
         raise ConfigError("设备未报告流控配置，请更新固件并重新读取")

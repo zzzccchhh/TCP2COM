@@ -87,7 +87,7 @@ def main():
             })()""")
             if optics.get("mode") != optics["expected"] or optics["overflow"]:
                 raise AssertionError(f"Native liquid glass did not initialize: {optics}")
-            if optics["filters"] != (5 if optics["expected"] == "refractive" else 0):
+            if optics["filters"] != (6 if optics["expected"] == "refractive" else 0):
                 raise AssertionError(f"Unexpected native optical resources: {optics}")
             if optics["controls"] < 3:
                 raise AssertionError(f"Native liquid controls did not initialize: {optics}")

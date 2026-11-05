@@ -15,9 +15,10 @@ FORM_FIELDS = {
                  "keepalive_interval", "keepalive_count", "bufsize", "stats_interval", "control_port",
                  "no_reset_ui", "verbose"),
     "usb_form": ("usb_port", "usb_baud", "usb_log"),
+    "net_log_form": ("net_log_host", "net_log_port"),
 }
 DRAFT_FIELDS = {
-    "common": ("link_mode", "flow_pin", "reset_pin", "mode", "band", "baud", "tcp_port", "net_role", "auto_reconnect",
+    "common": ("link_mode", "flow_pin", "reset_pin", "log_enabled", "log_port", "mode", "band", "baud", "tcp_port", "net_role", "auto_reconnect",
                "remote_ip", "remote_port", "local_port", "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb"),
     "ap": ("ap_ssid", "ap_channel", "ap_ip", "ap_gateway", "ap_netmask"),
     "pc": ("ssid", "static_ip", "ip", "gateway", "netmask", "dns"),
@@ -38,7 +39,7 @@ CHOICES = {
     ("common", "net_role"): (0, 1, 2),
     ("profile", "path_base"): ("program", "absolute"),
 }
-BOOLEANS = {"no_reset_ui", "verbose", "auto_reconnect", "static_ip"}
+BOOLEANS = {"no_reset_ui", "verbose", "auto_reconnect", "static_ip", "log_enabled"}
 
 
 def _group(document, fields, group, warnings, device=None):

@@ -56,7 +56,7 @@ test('native log filtering, current read and explicit save work through the brid
     await expect(page.getByText('E (123) device error', { exact: true })).toBeVisible();
     await expect(page.getByText('boot: ESP32 ready', { exact: true })).toBeVisible();
     await expect(page.locator('.log-row')).toHaveCount(2);
-    await expect(page.locator('.log-origin')).toHaveText(['ESP', 'ESP']);
+    await expect(page.locator('.log-origin')).toHaveText(['USB', 'USB']);
     await expect(page.getByRole('button', { name: 'USB', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'ESP', exact: true })).toHaveCount(0);
     await expect(page.getByText('主机连接已就绪', { exact: true })).not.toBeVisible();

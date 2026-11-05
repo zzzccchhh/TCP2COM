@@ -201,6 +201,31 @@ class GUITests(unittest.TestCase):
         self.gui._c5_enable()
         return config
 
+    def test_network_log_connects_without_com_and_nvs_fields_follow_device_support(self):
+        config = self.read_fixture()
+        self.assertEqual(str(self.gui.c5_forms["common"].widgets["log_port"]["state"]), "disabled")
+        config.update(log_enabled=True, log_port=19082)
+        self.gui._fill_c5(config)
+        self.gui._c5_enable()
+        self.assertEqual(self.gui.edited_c5()["log_port"], 19082)
+        self.gui.use_log_port()
+        self.assertEqual(self.gui.net_log_form.get("net_log_port"), "19082")
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            listener.settimeout(3)
+            self.gui.net_log_form.variables["net_log_host"].set("127.0.0.1")
+            self.gui.net_log_form.variables["net_log_port"].set(str(listener.getsockname()[1]))
+            self.gui.connect_network_log()
+            with listener.accept()[0] as peer:
+                peer.sendall(b"E (8) Tk network regression\n")
+                wait_for(lambda: any("Tk network regression" in row[1] for row in self.gui.logs), self.root.update)
+                self.assertIsNone(self.gui.controller.snapshot()[0])
+                self.assertIsNone(self.gui.controller.snapshot()[1])
+                self.assertTrue(any(row[0] == "net" and row[2] == "E" for row in self.gui.logs))
+                self.gui.controller.submit("network_log")
+                wait_for(lambda: self.gui.controller.net_log is None, self.root.update)
+
     def test_mode_fields_device_capabilities_and_local_output(self):
         self.assertEqual(self.gui.network.get("device"), "c5")
         self.assertEqual(str(self.gui.reset_button["state"]), "normal")

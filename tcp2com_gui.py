@@ -241,6 +241,21 @@ class BridgeGUI:
         self.advanced.add("no_reset_ui", "关闭 ESP-01S 复位入口", False, boolean=True)
         self.advanced.add("verbose", "调试日志", False, boolean=True)
         self._build_c5()
+        self.net_log_form = self._tab("网络日志")
+        self.net_log_form.add("net_log_host", "设备 IPv4", "")
+        self.net_log_form.add("net_log_port", "TCP 日志端口", "8082")
+        ttk.Button(self.net_log_form.frame, text="连接 / 应用网络日志", command=self.connect_network_log).grid(row=self.net_log_form.row, column=0, pady=8)
+        ttk.Button(self.net_log_form.frame, text="断开网络日志", command=lambda: self.controller.submit("network_log")).grid(row=self.net_log_form.row, column=1, pady=8)
+        self.net_log_form.row += 1
+        ttk.Button(self.net_log_form.frame, text="使用已读取的设备端口", command=self.use_log_port).grid(row=self.net_log_form.row, column=0, pady=8)
+        self.net_log_form.row += 1
+        self.net_log_status = tk.StringVar(self.root, value="未连接；无需开启业务桥接")
+        ttk.Label(self.net_log_form.frame, textvariable=self.net_log_status, wraplength=800).grid(row=self.net_log_form.row, column=0, columnspan=3, sticky="w")
+        self.net_log_form.row += 1
+        self.net_log_tree = ttk.Treeview(self.net_log_form.frame, columns=("value",), height=8)
+        self.net_log_tree.heading("#0", text="网络日志诊断字段")
+        self.net_log_tree.heading("value", text="最近值")
+        self.net_log_tree.grid(row=self.net_log_form.row, column=0, columnspan=3, sticky="nsew")
         self.usb_form = self._tab("USB 诊断")
         self.usb_form.note("USB 日志及配置需要手动连接；断开后可供 ESP-IDF monitor 使用。业务 COM 启动桥接时会被占用，请选择不同端口。")
         self.usb_form.add("usb_port", "USB COM（日志 / 配置，留空关闭）", "", serial_port=True)
@@ -301,7 +316,7 @@ class BridgeGUI:
         self.root.bind("<Configure>", lambda event: resize_footer() if event.widget is self.root else None, add="+")
         for widget in (self.footer_canvas, footer_content, *self.footer_labels):
             widget.bind("<MouseWheel>", scroll_footer)
-        for form in (self.network, self.local, self.advanced, self.usb_form):
+        for form in (self.network, self.local, self.advanced, self.usb_form, self.net_log_form):
             for variable in form.variables.values():
                 variable.trace_add("write", lambda *_: self._sync())
         self.config_transport.trace_add("write", lambda *_: self._sync())
@@ -371,6 +386,8 @@ class BridgeGUI:
         form.add("band", "频段", 0, {"2.4 GHz": 0, "5 GHz": 1, "自动（AP 使用 2.4 GHz）": 2})
         form.add("baud", "设备 UART 波特率（SPI 模式保留）", "1152000")
         form.add("tcp_port", "设备默认 TCP 服务端端口", "8080")
+        form.add("log_enabled", "启用网络日志（USB 同时保留）", True, boolean=True)
+        form.add("log_port", "设备 TCP 日志监听端口", "8082")
         for key, label, default in (
                 ("remote_ip","设备目标 IP","192.168.137.1"),
                 ("remote_port","设备目标端口","8080"),("local_port","设备本地端口（0 自动分配）","6060"),
@@ -407,7 +424,7 @@ class BridgeGUI:
         ttk.Label(toolbar, text="筛选").pack(side="left")
         ttk.Entry(toolbar, textvariable=self.filter_text, width=24).pack(side="left", padx=6)
         ttk.Label(toolbar, text="来源").pack(side="left")
-        ttk.Combobox(toolbar, textvariable=self.log_source, values=("全部", "上位机", "USB / ESP"),
+        ttk.Combobox(toolbar, textvariable=self.log_source, values=("全部", "上位机", "USB / ESP", "网络 / ESP"),
                      state="readonly", width=10).pack(side="left", padx=6)
         ttk.Checkbutton(toolbar, text="自动滚动（取消以暂停）", variable=self.autoscroll).pack(side="left")
         ttk.Button(toolbar, text="清空", command=self.clear_logs).pack(side="right")
@@ -522,7 +539,7 @@ class BridgeGUI:
         previous = self._state_loading
         self._state_loading = True
         try:
-            for form in (self.network, self.local, self.advanced, self.usb_form):
+            for form in (self.network, self.local, self.advanced, self.usb_form, self.net_log_form):
                 for key in form.variables:
                     form.set(key, values.get(key))
             self.config_url.set(values["config_url"])
@@ -534,7 +551,7 @@ class BridgeGUI:
 
     def settings(self):
         result = {}
-        for form in (self.network, self.local, self.advanced, self.usb_form):
+        for form in (self.network, self.local, self.advanced, self.usb_form, self.net_log_form):
             result.update(form.values())
         result["config_url"] = self.config_url.get().strip()
         result["config_transport"] = "usb" if self.config_transport.get() == "USB" else "http"
@@ -619,7 +636,7 @@ class BridgeGUI:
         self.network.widgets["device"].configure(state="disabled" if self.http_busy else "readonly")
         self.draft_button.configure(state="normal" if enabled and self.network.get("device") in self._device_drafts
                                     else "disabled")
-        for key in ("flow_pin","reset_pin","net_role","auto_reconnect","remote_ip","remote_port","local_port",
+        for key in ("log_enabled","log_port","flow_pin","reset_pin","net_role","auto_reconnect","remote_ip","remote_port","local_port",
                     "reconnect_ms","connect_timeout_ms","up_kb","down_kb"):
             self.c5_forms["common"].enable(key,enabled and self.baseline is not None and key in self.baseline)
         form = self.c5_forms["common"]
@@ -690,6 +707,20 @@ class BridgeGUI:
             self.error("配置请求正在进行，请等待完成后再停止 USB")
             return
         self.controller.submit("stop")
+
+    def use_log_port(self):
+        if self.baseline and "log_port" in self.baseline:
+            self.net_log_form.variables["net_log_port"].set(str(self.baseline["log_port"]))
+        else:
+            self.error("请先读取支持网络日志的 C5 设备")
+
+    def connect_network_log(self):
+        from network_log import log_target
+        try:
+            target = log_target(self.net_log_form.get("net_log_host"), self.net_log_form.get("net_log_port"))
+            if not self.controller.submit("network_log", target): raise ValueError("连接操作正在进行")
+        except ValueError as exc:
+            self.error(exc)
 
     def apply_usb(self):
         if self.http_busy:
@@ -822,7 +853,7 @@ class BridgeGUI:
             result.pop("flow_pin", None)
         if self.network.get("device") not in ("c5", "s3") or not self.baseline or "reset_pin" not in self.baseline:
             result.pop("reset_pin", None)
-        for key in ("baud", "tcp_port", "remote_port", "local_port", "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb"):
+        for key in ("baud", "tcp_port", "log_port", "remote_port", "local_port", "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb"):
             try:
                 result[key] = int(result[key])
             except ValueError as exc:
@@ -836,7 +867,7 @@ class BridgeGUI:
             result[name] = {key: value for key, value in self.c5_forms[name].values().items()
                             if key not in ("password", "clear_password")}
         if self.baseline is not None:
-            for key in ("flow_pin","reset_pin","net_role","auto_reconnect","remote_ip","remote_port","local_port",
+            for key in ("log_enabled","log_port","flow_pin","reset_pin","net_role","auto_reconnect","remote_ip","remote_port","local_port",
                         "reconnect_ms","connect_timeout_ms","up_kb","down_kb"):
                 if key not in self.baseline:
                     result.pop(key,None)
@@ -885,7 +916,11 @@ class BridgeGUI:
             document = json.loads(Path(path).read_text(encoding="utf-8-sig"))
             if not isinstance(document, dict) or document.get("format") not in ("c5-user-config-v1", "wifi-bridge-user-config-v1"):
                 raise ConfigError("不支持的设备备份格式（与电脑 profiles 文件不同）")
-            self._fill_c5(public_draft_config(document["config"], self.network.get("device")))
+            imported = public_draft_config(document["config"], self.network.get("device"))
+            for key in ("log_enabled", "log_port"):
+                if key not in imported and self.baseline and key in self.baseline:
+                    imported[key] = self.baseline[key]
+            self._fill_c5(imported)
             self._remember_device_draft()
             self.c5_status.set("已导入到编辑区；旧接口需重新选择，密码未导入，尚未写入设备")
         except (KeyError, ValueError, OSError) as exc:
@@ -958,8 +993,8 @@ class BridgeGUI:
                 timestamp, source, text = self.controller.ui.events.get_nowait()
             except queue.Empty:
                 break
-            match = ESP_LEVEL.match(text) if source == "usb" else None
-            label = "USB / ESP" if source == "usb" else "上位机"
+            match = ESP_LEVEL.match(text) if source in ("usb", "net") else None
+            label = {"usb": "USB / ESP", "net": "网络 / ESP"}.get(source, "上位机")
             line = time.strftime("%H:%M:%S", time.localtime(timestamp)) + f" [{label}] " + text
             self.logs.append((source, line, match.group(1) if match else ""))
             self.log_dirty = True
@@ -970,7 +1005,7 @@ class BridgeGUI:
             self.log_text.delete("1.0", "end")
             selected = self.log_source.get()
             for source, line, level in self.logs:
-                if (selected == "上位机" and source != "host") or (selected == "USB / ESP" and source != "usb"):
+                if (selected == "上位机" and source != "host") or (selected == "USB / ESP" and source != "usb") or (selected == "网络 / ESP" and source != "net"):
                     continue
                 if search in line.casefold():
                     self.log_text.insert("end", line + "\n", level)
@@ -1055,6 +1090,12 @@ class BridgeGUI:
                 self.rates.set("网络接收 / 本地写入 / 网络发送：0 B/s")
                 self.bridge_detail.set("")
             self._usb_status(usb, now)
+            monitor = self.controller.net_log
+            status = monitor.status() if monitor else None
+            self.net_log_status.set("未连接" if not status else f"{status['host']}:{status['port']} · {status['message']} · 丢弃 {status['dropped']} 条 · stats {status['age'] if status['age'] is not None else '未收到'} 秒前")
+            self.net_log_tree.delete(*self.net_log_tree.get_children())
+            for key, value in (status or {}).get("fields", {}).items():
+                self.net_log_tree.insert("", "end", text=key, values=(value,))
         self.poll_job = self.root.after(100, self.poll)
 
     def _usb_status(self, usb, now):

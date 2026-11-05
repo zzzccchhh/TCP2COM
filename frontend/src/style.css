@@ -351,3 +351,8 @@ select { appearance: none; width: 100%; }
     .lan-entry { position: static; }
     .lan-connection-state { position: absolute; top: 67px; right: 0; max-width: calc(100vw - 32px); }
 }
+
+@media (min-width: 761px) and (max-width: 1210px) {
+    .device-column .device-panel { grid-row: 1 / 4; }
+    .device-column .reset-card { grid-row: 3; }
+}

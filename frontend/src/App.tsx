@@ -73,6 +73,7 @@ export default function App() {
     const [logs, setLogs] = useState<Data[]>([]);
     const [tab, setTab] = useState('traffic');
     const [source, setSource] = useState('all');
+    const [savedLogPort, setSavedLogPort] = useState<number | null>(null);
     const [search, setSearch] = useState('');
     const [autoscroll, setAutoscroll] = useState(true);
     const [toast, setToast] = useState('');
@@ -237,6 +238,7 @@ export default function App() {
         settingsRef.current = next;
         setSettings(next);
         if (['device', 'config_transport', 'config_url', 'usb_port'].includes(key)) {
+            setSavedLogPort(null);
             setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); setConfirm(null);
             setSnap(previous => ({ ...previous, baseline: null }));
         }
@@ -310,7 +312,7 @@ export default function App() {
     if (device === 'c5') linkOptions.push([3, 'UART GPIO 流控透传']);
     if (device !== 'c5') linkOptions.push([2, 'UART WBR/1']);
     if (device === 'c5' && config.link_mode === -1) linkOptions.unshift([-1, '请选择接口（旧接口已移除）']);
-    const optional = ['flow_pin', 'reset_pin', 'net_role', 'auto_reconnect', 'remote_ip', 'remote_port', 'local_port', 'reconnect_ms', 'connect_timeout_ms', 'up_kb', 'down_kb'];
+    const optional = ['log_enabled', 'log_port', 'flow_pin', 'reset_pin', 'net_role', 'auto_reconnect', 'remote_ip', 'remote_port', 'local_port', 'reconnect_ms', 'connect_timeout_ms', 'up_kb', 'down_kb'];
     const cf = (key: string, label: string, extra: Partial<FieldProps> = {}, group?: string) => <Field key={`${group || ''}${key}`} label={label}
         value={group ? config[group]?.[key] : config[key]} onChange={value => editConfig(key, value, group)}
         disabled={working || snap.config_busy || (!!snap.baseline && optional.includes(key) && !(key in snap.baseline))} {...extra} />;
@@ -320,7 +322,7 @@ export default function App() {
     const usbStale = snap.usb?.age != null && snap.usb.age > 15;
     const visibleLogs = useMemo(() => logs.filter(row => (source === 'all' || row.source === source)
         && `${row.text} ${row.time}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())), [logs, source, search]);
-    const logRows = useMemo(() => visibleLogs.map(row => <div className={`log-row level-${row.level}`} key={row.id}><time>{row.time}</time><span className="log-origin">{row.source === 'host' ? 'HOST' : 'ESP'}</span><span className="log-message">{row.text}</span></div>), [visibleLogs]);
+    const logRows = useMemo(() => visibleLogs.map(row => <div className={`log-row level-${row.level}`} key={row.id}><time>{row.time}</time><span className="log-origin">{row.source === 'host' ? 'HOST' : row.source === 'net' ? 'NET' : 'USB'}</span><span className="log-message">{row.text}</span></div>), [visibleLogs]);
     const rates = snap.rates as number[];
     const activeMode = snap.running_settings?.mode ?? settings.mode;
     const udpMode = activeMode === 'udp';
@@ -410,10 +412,10 @@ export default function App() {
                                 <LiquidButton className="icon-button" title="清空日志" aria-label="清空日志" onClick={() => run(async () => { await call('clear_logs'); setLogs([]); })}><Trash2 size={15} /></LiquidButton></div>
                         </div>
                         <div className="log-sources"><LiquidSegments className="log-filter" label="日志来源" value={source} onChange={setSource}
-                            items={[{ value: 'all', label: <>全部<span>{logs.length}</span></> }, { value: 'host', label: '上位机' }, { value: 'usb', label: 'ESP（USB）' }]} /><span className="log-retention">最近 3,000 行</span></div>
-                        <SlidingContent value={source} order={['all', 'host', 'usb']} fill className="log-content">
+                            items={[{ value: 'all', label: <>全部<span>{logs.length}</span></> }, { value: 'host', label: '上位机' }, { value: 'usb', label: 'ESP（USB）' }, { value: 'net', label: 'ESP（网络）' }]} /><span className="log-retention">最近 3,000 行</span></div>
+                        <SlidingContent value={source} order={['all', 'host', 'usb', 'net']} fill className="log-content">
                         <div className="log-body" data-slide-scroll="logs" ref={logBody} role="log" aria-label="运行日志" aria-live="off">
-                            {visibleLogs.length ? logRows : <div className="empty-log"><span className="empty-symbol"><Terminal size={27} strokeWidth={1.3} /></span><h2>{search || source !== 'all' ? '没有匹配的日志' : '等待连接，准备就绪'}</h2><p>{search || source !== 'all' ? '试试其他关键词或切换日志来源。' : '启动桥接，或单独连接 USB。\n连接事件与设备日志将在这里显示。'}</p><span className="terminal-prompt"><i />READY WHEN YOU ARE</span></div>}
+                            {visibleLogs.length ? logRows : <div className="empty-log"><span className="empty-symbol"><Terminal size={27} strokeWidth={1.3} /></span><h2>{search || source !== 'all' ? '没有匹配的日志' : '等待连接，准备就绪'}</h2><p>{search || source !== 'all' ? '试试其他关键词或切换日志来源。' : '启动桥接，或单独连接 USB / 网络日志。\n连接事件与设备日志将在这里显示。'}</p><span className="terminal-prompt"><i />READY WHEN YOU ARE</span></div>}
                         </div>
                         </SlidingContent>
                         <div className="terminal-footer"><span><i className={`status-dot ${snap.connected ? 'online' : ''}`} />{autoscroll ? '自动滚动' : '已暂停滚动'}</span><span>UTF-8<span className="footer-dot">·</span>{visibleLogs.length} 行{snap.log_dropped > 0 && ` · 队列丢弃 ${snap.log_dropped}`}</span></div>
@@ -448,6 +450,14 @@ export default function App() {
                         <LiquidButton className="button full" onClick={event => setDrawer('config', event.currentTarget)}><SlidersHorizontal size={14} />打开配置面板<ArrowRight size={14} /></LiquidButton>
                         <p className="setup-note"><Info size={12} /><span>配网：{device === 'c5' ? 'Key' : 'GPIO4'} 长按 3 秒进入配网。</span></p>
                     </> : <p className="setup-note">ESP-01S 保留透传和远程复位功能。</p>}
+                </GlassSurface>
+
+                <GlassSurface className="panel usb-panel" aria-label="网络日志连接"><div className="panel-title"><span><Network size={17} />网络日志</span><Badge active={!!snap.net_log?.connected} warning={!!snap.net_log && !snap.net_log.connected}>{snap.net_log?.connected ? '已连接' : snap.net_log ? '重试中' : '未连接'}</Badge></div>
+                    <div className="form-stack">{field('net_log_host', '日志设备 IPv4', { disabled: waiting })}{field('net_log_port', '日志目标端口', { disabled: waiting })}</div>
+                    <LiquidButton className="button full secondary" disabled={waiting} onClick={() => run(() => call('network_log', !snap.net_log))}>{snap.net_log ? '断开网络日志' : '连接网络日志'}</LiquidButton>
+                    <LiquidButton className="text-button" disabled={waiting || !snap.baseline?.log_port} onClick={() => change('net_log_port', String(snap.baseline.log_port))}>使用已读取的设备日志端口</LiquidButton>
+                    <p className="small-copy">独立于业务桥接和 USB。{snap.net_log ? `${snap.net_log.host}:${snap.net_log.port} · ${snap.net_log.message}` : '填写设备地址即可查看日志。'}</p>
+                    {savedLogPort !== null && <div className="notice"><span>设备已确认保存日志端口 {savedLogPort}，重启后生效。核对目标 IP 后可重连。</span><LiquidButton className="text-button" disabled={waiting} onClick={() => run(async () => { change('net_log_port', String(savedLogPort)); await pendingSettings.current; if (settingsError.current) throw Error(settingsError.current); await call('network_log', true); setSavedLogPort(null); })}>使用新端口重连</LiquidButton></div>}
                 </GlassSurface>
 
                 <GlassSurface className="reset-card"><div><span><Zap size={15} />远程复位</span><small>复位连接的外部主控</small></div><LiquidButton className="icon-button" title="打开远程复位" aria-label="打开远程复位" onClick={event => setDrawer('reset', event.currentTarget)}><ArrowUpRight size={18} /></LiquidButton></GlassSurface>
@@ -494,6 +504,7 @@ export default function App() {
                             {cf('tcp_port', 'TCP 服务端口', { numeric: true })}{cf('remote_ip', '设备目标 IP')}
                             {cf('remote_port', '设备目标端口', { numeric: true })}{cf('local_port', '设备本地端口（0 自动）', { numeric: true })}
                         </div></div>
+                        <div className="config-section"><h3>网络日志</h3><Toggle tone="green" checked={!!config.log_enabled} disabled={waiting || !snap.baseline || !('log_enabled' in snap.baseline)} onChange={value => editConfig('log_enabled', value)}>启用网络日志（USB 同时保留）</Toggle><div className="form-grid">{cf('log_port', '设备 TCP 日志监听端口', { numeric: true, disabled: waiting || !snap.baseline || !('log_port' in snap.baseline) })}</div><p>{snap.baseline && 'log_port' in snap.baseline ? '保存到设备并重启后生效；修改草稿不会改变当前日志连接。' : '请读取支持网络日志的 C5 固件；旧固件及其他型号不支持此设置。'}</p></div>
                         <div className="config-section"><h3>恢复与缓冲</h3><Toggle tone="green" checked={!!config.auto_reconnect} disabled={waiting || (!!snap.baseline && !('auto_reconnect' in snap.baseline))} onChange={value => editConfig('auto_reconnect', value)}>设备自动重连</Toggle><div className="form-grid">
                             {cf('reconnect_ms', '重连间隔 / ms', { numeric: true })}{cf('connect_timeout_ms', '连接超时 / ms', { numeric: true })}
                             {cf('up_kb', '上行缓冲 / KiB', { numeric: true })}{cf('down_kb', '下行缓冲 / KiB', { numeric: true })}
@@ -525,7 +536,8 @@ export default function App() {
                         <h3>固件诊断字段</h3><div className={`notice ${usbStale ? 'warning' : ''}`}><Info size={15} /><span>{!snap.usb ? 'USB 未连接' : !usbOnline ? 'USB 离线 / 重试中，旧数值不代表设备在线' : snap.usb.age == null ? '尚未收到 stats' : `stats ${snap.usb.age.toFixed(1)} 秒前更新${usbStale ? '（已过期）' : ''}`}</span></div>
                         <dl className="diagnostic-list">{Object.entries(snap.usb?.fields || {}).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl></>}
                 </>}
-                {shownDrawer === 'reset' && <><div className="notice"><Zap size={16} /><span>在 3 秒内连续点击 5 次触发复位。</span></div>{device !== 'esp01s' && <div className="form-stack"><Field label="设备 IPv4 地址" value={resetHost} disabled={snap.reset.busy} onChange={setResetHost} /><Field label="控制端口" value={resetPort} disabled={snap.reset.busy} onChange={setResetPort} /></div>}
+                {shownDrawer === 'diagnostics' && <><h3>网络日志诊断字段</h3><div className="notice"><span>{!snap.net_log ? '网络日志未连接' : !snap.net_log.connected ? '网络日志离线 / 重试中，旧数值不代表设备在线' : snap.net_log.age == null ? '尚未收到 stats' : `stats ${snap.net_log.age.toFixed(1)} 秒前更新${snap.net_log.age > 15 ? '（已过期）' : ''}`} · 接收丢弃 {snap.net_log?.dropped || 0} 条</span></div><dl className="diagnostic-list">{Object.entries(snap.net_log?.fields || {}).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl></>}
+                {shownDrawer === 'reset'  && <><div className="notice"><Zap size={16} /><span>在 3 秒内连续点击 5 次触发复位。</span></div>{device !== 'esp01s' && <div className="form-stack"><Field label="设备 IPv4 地址" value={resetHost} disabled={snap.reset.busy} onChange={setResetHost} /><Field label="控制端口" value={resetPort} disabled={snap.reset.busy} onChange={setResetPort} /></div>}
                     <div className="reset-progress">{Array.from({ length: 5 }, (_, i) => <i key={i} className={i < snap.reset.count ? 'filled' : ''} />)}</div>
                     <LiquidButton className="button primary full" disabled={snap.reset.busy} onClick={() => run(() => call('reset_click', resetHost, resetPort))}><Zap size={15} />{snap.reset.busy ? '复位请求进行中…' : `复位外部主控 · ${snap.reset.count}/5`}</LiquidButton><p className="small-copy">{snap.reset.message}</p>
                 </>}
@@ -536,7 +548,7 @@ export default function App() {
 
         {shownConfirm && <div className="modal-backdrop liquid-overlay" data-state={confirmMotion.entered ? 'open' : 'closed'} aria-hidden={!confirm || undefined} inert={!confirm}><div className="overlay-shade" aria-hidden="true" /><GlassSurface className="confirm-dialog" role="dialog" aria-modal="true" aria-label="确认保存设备配置" onTransitionEnd={event => {
             if (!confirm && event.target === event.currentTarget && ['transform', 'opacity'].includes(event.propertyName)) confirmMotion.finishExit();
-        }}><div className="confirm-icon"><Settings2 size={22} /></div><h2>保存配置并重启？</h2><p>以下修改将写入 {labels[device]} 的 NVS。<br />设备重启期间业务连接会中断。</p><div className="change-list">{shownConfirm.changes.length ? shownConfirm.changes.map((item: Data) => <div key={item.field}><span>{item.field}</span><strong>{item.value}</strong></div>) : <p>明确保存当前运行配置</p>}</div><div className="dialog-actions"><LiquidButton className="button" disabled={working} onClick={() => setConfirm(null)}>取消</LiquidButton><LiquidButton className="button primary" disabled={working} onClick={() => run(async () => { const pending = shownConfirm; setConfirm(null); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); await call('save_device', pending.config, pending.passwords, pending.clear, pending.epoch); notify('设备已确认保存并请求重启，请重新读取核对'); })}>{working && <LoaderCircle size={14} className="spin" />}确认保存并重启</LiquidButton></div></GlassSurface></div>}
+        }}><div className="confirm-icon"><Settings2 size={22} /></div><h2>保存配置并重启？</h2><p>以下修改将写入 {labels[device]} 的 NVS。<br />设备重启期间业务连接会中断。</p><div className="change-list">{shownConfirm.changes.length ? shownConfirm.changes.map((item: Data) => <div key={item.field}><span>{item.field}</span><strong>{item.value}</strong></div>) : <p>明确保存当前运行配置</p>}</div><div className="dialog-actions"><LiquidButton className="button" disabled={working} onClick={() => setConfirm(null)}>取消</LiquidButton><LiquidButton className="button primary" disabled={working} onClick={() => run(async () => { const pending = shownConfirm; setConfirm(null); setPasswords({ ap: '', pc: '', shared: '' }); setClear([]); const result = await call('save_device', pending.config, pending.passwords, pending.clear, pending.epoch); if (result?.saved && pending.config.log_enabled && pending.config.log_port) setSavedLogPort(pending.config.log_port); notify('设备已确认保存并请求重启，请重新读取核对'); })}>{working && <LoaderCircle size={14} className="spin" />}确认保存并重启</LiquidButton></div></GlassSurface></div>}
         {toast && <div className="toast" role="status"><Info size={16} /><span>{toast}</span><LiquidButton className="icon-button" aria-label="关闭提示" onClick={() => setToast('')}><X size={14} /></LiquidButton></div>}
     </div>;
 }

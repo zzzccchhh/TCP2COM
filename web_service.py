@@ -17,6 +17,7 @@ from c5_config import C5Client, ConfigError, changed_config, public_config, publ
 from c5_usb_config import C5USBClient
 from device_capabilities import capabilities
 from desktop_appearance import save_preference
+from network_log import log_target
 from gui_state import CHOICES, BOOLEANS, DRAFT_FIELDS, FORM_FIELDS, VERSION, clean_state, load_state, save_state
 from gui_support import BridgeController, default_settings, load_profile, settings_to_args
 from reset_control import FiveClickGate, ResetError, perform_reset
@@ -70,7 +71,7 @@ def draft_to_config(draft, device):
             target = result[group] if group in ("pc", "shared") else result
             for key, value in values.items():
                 if key in DRAFT_FIELDS[group]:
-                    if type(target.get(key)) is int and isinstance(value, str) and value.isascii() and value.isdigit():
+                    if (key == "log_port" or type(target.get(key)) is int) and isinstance(value, str) and value.isascii() and value.isdigit():
                         value = int(value)
                     target[key] = value
     if device == "c5" and result.get("link_mode") in (1, 2):
@@ -284,6 +285,16 @@ class WebService:
             return True
 
     @endpoint
+    def network_log(self, connect):
+        with self._lock:
+            self._ensure_open()
+            if type(connect) is not bool: raise ValueError("日志连接操作格式不正确")
+            target = log_target(self._settings["net_log_host"], self._settings["net_log_port"]) if connect else None
+            if not self._controller.submit("network_log", target):
+                raise ValueError("连接操作正在进行，请稍后再试")
+            return True
+
+    @endpoint
     def remember_draft(self, device, config):
         with self._lock:
             self._ensure_open()
@@ -347,7 +358,7 @@ class WebService:
         if self._baseline is None or self._identity != client.identity:
             raise ConfigError("请先从当前连接读取设备，之后才能保存")
         candidate = copy.deepcopy(edited)
-        for key in ("flow_pin", "reset_pin", "net_role", "auto_reconnect", "remote_ip", "remote_port", "local_port",
+        for key in ("log_enabled", "log_port", "flow_pin", "reset_pin", "net_role", "auto_reconnect", "remote_ip", "remote_port", "local_port",
                     "reconnect_ms", "connect_timeout_ms", "up_kb", "down_kb"):
             if key not in self._baseline:
                 candidate.pop(key, None)
@@ -406,7 +417,11 @@ class WebService:
             document = json.loads(text.lstrip("\ufeff"))
             if not isinstance(document, dict) or document.get("format") not in ("c5-user-config-v1", "wifi-bridge-user-config-v1"):
                 raise ValueError("不支持的设备备份格式")
-            return public_draft_config(document["config"], self._settings["device"])
+            imported = public_draft_config(document["config"], self._settings["device"])
+            for key in ("log_enabled", "log_port"):
+                if key not in imported and self._baseline and key in self._baseline:
+                    imported[key] = self._baseline[key]
+            return imported
 
     @endpoint
     def backup_config(self, edited):
@@ -421,7 +436,7 @@ class WebService:
             except queue.Empty:
                 break
             text = ANSI.sub("", text)
-            match = LEVEL.match(text) if source == "usb" else None
+            match = LEVEL.match(text) if source in ("usb", "net") else None
             self._sequence += 1
             self._logs.append({"id": self._sequence, "time": time.strftime("%H:%M:%S", time.localtime(timestamp)),
                                "source": source, "level": match.group(1) if match else "", "text": text})
@@ -438,7 +453,8 @@ class WebService:
     def export_logs(self):
         with self._lock:
             self._drain_logs()
-            return "\n".join(f"{row['time']} [{'USB / ESP' if row['source'] == 'usb' else '上位机'}] {row['text']}"
+            labels = {"usb": "USB / ESP", "net": "网络 / ESP"}
+            return "\n".join(f"{row['time']} [{labels.get(row['source'], '上位机')}] {row['text']}"
                              for row in self._logs) + "\n"
 
     @endpoint
@@ -447,6 +463,7 @@ class WebService:
             self._drain_logs()
             self._check_usb_identity()
             app, usb, running, state, busy = self._controller.snapshot()
+            net_monitor = getattr(self._controller, "net_log", None)
             try:
                 self._controller.ui.stats_interval = max(.1, min(float(self._settings["stats_interval"]), 5))
             except (ValueError, TypeError):
@@ -493,14 +510,14 @@ class WebService:
                 values["usb_port"] = values["usb_log"] = None
                 edited = vars(settings_to_args(values))
                 applied = running is not None and all(edited.get(key) == value for key, value in running.items()
-                    if key not in ("usb_port", "usb_baud", "usb_log", "config_url", "config_transport", "stats_interval"))
+                    if key not in ("net_log_host", "net_log_port", "usb_port", "usb_baud", "usb_log", "config_url", "config_transport", "stats_interval"))
             except ValueError:
                 valid = False
             self._gate.expire(now)
             return {"state": state, "running": bool(app), "connected": connected, "busy": busy,
                     "running_settings": running, "applied": applied, "valid": valid, "address": address,
                     "rates": self._rates, "stats": stats, "queued": queued, "peak": peak,
-                    "usb": usb_status, "config_busy": self._config_busy, "config_status": self._status,
+                    "usb": usb_status, "net_log": net_monitor.status() if net_monitor else None, "config_busy": self._config_busy, "config_status": self._status,
                     "baseline": copy.deepcopy(self._baseline), "epoch": self._epoch,
                     "state_status": self._state_status, "log_dropped": self._controller.ui.dropped,
                     "logs": [row for row in self._logs if row["id"] > cursor],

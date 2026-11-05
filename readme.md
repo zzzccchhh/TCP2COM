@@ -1,10 +1,22 @@
 # ESP-01S / ESP32-C5 / ESP32-S3 网络串口上位机
 
-Python 网络到串口桥接工具，支持 TCP 客户端、TCP 服务端、固定对端 UDP、原生 USB 日志与设备配置。提供 React 桌面工作台、局域网多端页面、Tkinter 界面和命令行入口。
+Python 网络到串口桥接工具，支持 TCP 客户端、TCP 服务端、固定对端 UDP、原生 USB / 独立 TCP 日志与设备配置。提供 React 桌面工作台、局域网多端页面、Tkinter 界面和命令行入口。
 
 [Gitee 仓库](https://gitee.com/zch_good/esp-tcp2com) · [GitHub 仓库](https://github.com/zzzccchhh/TCP2COM) · [在线工作台](https://zzzccchhh.github.io/TCP2COM/) · [配套 C5 固件](https://gitee.com/zch_good/esp-c5-wifi)
 
 在线工作台运行界面；服务电脑上的 Python 后端负责实际网络、COM 和 USB 操作。手机浏览器控制的也是服务电脑，不直接占用手机串口。
+
+## 独立网络日志与 NVS 端口
+
+新版 C5 固件同时保留 USB 日志，并通过独立 TCP 端口输出日志，默认 8082。在完整工作台的“网络日志”填写设备 IPv4 和日志目标端口后连接，不需要业务 COM 或 USB；停止业务桥接不影响日志。网页/手机界面由本机后端访问 ESP，不由浏览器直接建立 TCP。连接失败会重试，断开按钮取消重试；保存本机设置或恢复上次状态不会自动连接。
+
+进入 C5 配网并读取设备后，在“设备配置 → 网络日志”修改启用开关和设备 TCP 日志监听端口，再预览、确认保存并重启。端口为 1024～65535，启用时校验 8081 和业务 TCP 本地端口冲突，允许 UDP 使用同号端口。设备确认保存后提示新端口，核对目标 IP 并点击“使用新端口重连”；修改草稿或保存结果未知时不会自动切换。也可用“使用已读取的设备日志端口”填入电脑端目标端口。电脑端参数与设备 NVS 分别保存。
+
+运行日志支持全部、上位机、ESP（USB）、ESP（网络）来源筛选，以及级别颜色、搜索、清空和导出。网络行标记 NET，USB 行标记 USB；缓存保留最近 3000 行。诊断中分别展示两种连接的 stats 字段、更新时间、离线/过期状态和接收丢弃数。未完成的接收行限制为 8192 字节，跨包 UTF-8 在完整行后解码。
+
+C5 的 TCP／数据灯仍跟随业务链路；只接收网络日志不会触发它的传输呼吸，连接状态应以本页“网络日志”状态为准。
+
+旧固件及其他设备型号读取不到新字段时，禁用设备日志设置并保留既有保存协议。旧备份缺少日志字段时保留当前设备值；草稿、JSON 备份和本机状态支持新增字段。设备仅接受一个 TCP 日志订阅者；多个网页可共享同一后端，两个独立后端同时连接同一 ESP 会竞争该订阅位置。网络只能看到固件捕获后的日志，早期 ROM/bootloader 输出仍使用 USB。
 
 ## 当前设备能力
 
@@ -316,8 +328,10 @@ GitHub `main` 的推送触发 [Pages 工作流](.github/workflows/pages.yml)，�
 | `tcp2com_web.py`、`web_service.py`、`frontend/` | 本机 React/WebView2 工作台 |
 | `lan_service.py`、`lan_manager.py`、`lan_network.py` | 局域网多端后端、管理窗口和网卡地址 |
 | `c5_config.py`、`c5_usb_config.py` | C5/S3 HTTP/USB 配置、草稿校验和保存 |
-| `usb_diagnostics.py`、`reset_control.py` | USB 诊断与独立复位控制 |
+| `usb_diagnostics.py`、`network_log.py`、`reset_control.py` | USB / TCP 日志诊断与独立复位控制 |
 | `gui_state.py`、`lan_preferences.py` | 无密码状态、服务参数恢复 |
 | `tests/`、`tools/` | 主机回归、浏览器/设备配置配对工具 |
 
 本地状态、接收数据、USB 日志、`frontend/dist` 和依赖目录不作为源码提交。提交或分享配置前检查个人地址、密码和设备设置。
+
+网络日志验证（2026-11-05）：使用`py -3`完成255项Python回归，无跳过，包含真实Tkinter与Windows桌面启动；两套网页的网络日志、保存重连、工作台、局域网与手机导航相关回归通过。新版C5生产C解析器配对覆盖UART/SPI/UDP和保存回执丢失，不自动重发；前端生产构建通过。网络日志使用本地TCP模拟，尚未烧录或连接实板确认无线稳定性。

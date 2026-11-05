@@ -133,7 +133,7 @@ def run_pair(args, link_mode=4, net_role=0, drop_save=False):
                 band, channel = ((0, 6), (1, 36), (2, 6))[net_role]
                 if "flow_pin" in config:
                     patch["flow_pin"] = 1
-                patch.update(link_mode=link_mode, band=band, ap_channel=channel, net_role=net_role,
+                patch.update(log_enabled=True, log_port=19082, link_mode=link_mode, band=band, ap_channel=channel, net_role=net_role,
                              auto_reconnect=False, remote_ip="192.168.137.99", remote_port=9000,
                              local_port=0, reconnect_ms=2000, connect_timeout_ms=5000,
                              up_kb=2048, down_kb=512)

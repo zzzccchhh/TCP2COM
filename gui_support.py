@@ -14,6 +14,7 @@ import tempfile
 from bridge_settings import _unique_object
 from tcp2com import App, build_parser, parse_args
 from usb_diagnostics import USBMonitor
+from network_log import NetworkLogMonitor
 from device_capabilities import capabilities
 
 
@@ -23,7 +24,7 @@ class FormParser(argparse.ArgumentParser):
 
 
 def default_settings():
-    return vars(build_parser().parse_args([]))
+    return {**vars(build_parser().parse_args([])), "net_log_host": "", "net_log_port": "8082"}
 
 
 def settings_to_args(settings):
@@ -31,7 +32,7 @@ def settings_to_args(settings):
                if a.dest not in ("help", "config", "profile", "list_coms", "open_config")}
     argv = []
     for key, value in settings.items():
-        if key in ("config", "profile", "list_coms", "open_config"):
+        if key in ("config", "profile", "list_coms", "open_config", "net_log_host", "net_log_port"):
             continue
         if key not in actions:
             if key == "capture":
@@ -138,6 +139,7 @@ class BridgeController:
         self.lock = threading.Lock()
         self.app = None
         self.usb = None
+        self.net_log = None
         self.running_settings = None
         self.state = "已停止"
         self.busy = False
@@ -216,6 +218,14 @@ class BridgeController:
                         stats.start()
                     else:
                         app.stop()
+                elif command == "network_log":
+                    if self.net_log:
+                        self.net_log.close()
+                        self.net_log = None
+                    if args and not self.closing:
+                        self.net_log = NetworkLogMonitor(args[0], args[1],
+                            lambda text: self.ui.message(text, source="net"), self.ui.message)
+                        self.net_log.start()
                 elif command == "usb":
                     self._usb(args)
                     with self.lock:
@@ -235,6 +245,7 @@ class BridgeController:
                 self.commands.task_done()
         self._stop_app()
         self._usb(None)
+        if self.net_log: self.net_log.close()
         logging.getLogger("tcp2com").removeHandler(self.log_handler)
         with self.lock:
             self.busy = False
