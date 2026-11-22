@@ -1,4 +1,5 @@
 """Isolated browser test fixture: loopback only, temporary settings, no devices opened."""
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -15,7 +16,7 @@ if __name__ == '__main__':
     with tempfile.TemporaryDirectory() as directory:
         service = WebService(state_path=Path(directory) / 'state.json')
         adapter = LANService(service, ['http://127.0.0.1:4173'])
-        server = make_server('127.0.0.1', 8766, adapter)
+        server = make_server('127.0.0.1', 8766, adapter, dist=os.environ.get('TCP2COM_FRONTEND_DIST'))
         # Test driver only. Production has no web approval route; the native manager calls decide().
         class TestSupervisor(BaseHTTPRequestHandler):
             def log_message(self, *args):

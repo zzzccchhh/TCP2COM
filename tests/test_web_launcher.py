@@ -46,10 +46,10 @@ class StartupTests(unittest.TestCase):
             self.assertEqual(launcher.main(["--windowed"]), 1)
         runtime.assert_not_called()
         message, windowed, log_path = show.call_args.args
-        self.assertIn("前端尚未构建", message)
+        self.assertIn("前端尚未安装", message)
         self.assertTrue(windowed)
         self.assertEqual(log_path, self.log)
-        self.assertIn("前端尚未构建", self.log.read_text(encoding="utf-8"))
+        self.assertIn("前端尚未安装", self.log.read_text(encoding="utf-8"))
 
     def test_missing_python_dependency_has_actionable_popup(self):
         self.build_entry()
@@ -81,7 +81,7 @@ class StartupTests(unittest.TestCase):
         output = io.StringIO()
         with redirect_stderr(output):
             self.assertEqual(launcher.main([]), 1)
-        self.assertIn("前端尚未构建", output.getvalue())
+        self.assertIn("前端尚未安装", output.getvalue())
         self.assertIn(str(self.log), output.getvalue())
 
     def test_window_creation_failure_cleans_up_service_and_records_traceback(self):

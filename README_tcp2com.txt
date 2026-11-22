@@ -2,7 +2,7 @@ tcp2com 使用速查
 
 完整说明：readme.md
 上位机 GitHub：https://github.com/zzzccchhh/TCP2COM
-在线工作台：https://zzzccchhh.github.io/TCP2COM/
+在线工作台：https://zzzccchhh.github.io/TCP2COM-FRONT/
 配套 C5 固件：https://gitee.com/zch_good/esp-c5-wifi
 
 一、安装与启动
@@ -11,7 +11,7 @@ tcp2com 使用速查
    CLI/Tkinter：py -3 -m pip install -r requirements-tcp2com.txt
    新版桌面：py -3 -m pip install -r requirements-web.txt
    局域网服务：py -3 -m pip install -r requirements-lan.txt
-2. 新版前端首次构建：进入 frontend，执行 npm ci、npm run build。
+2. 新版前端首次安装：运行“启动_新版界面.bat”或“启动_局域网服务.bat”，启动器会安装固定版本。
    工作台默认使用原始暖灰/米白/灰绿色，并支持深色液态玻璃风格，桌面 Chromium/WebView2 支持背景折射；手机和平板的浮层卡片同样启用背景折射，普通主页面大面板保留轻量材质，切换条滑块保留折射，菜单行高亮使用静态玻璃。
    效果随前端本地打包，不依赖 CDN 或在线背景图；支持系统“减少动态效果”。授权说明见 third-party-licenses.txt。
    “当前设备”左侧“外观”可选原始浅色、深色、跟随系统；首次默认浅色。深色为近纯黑背景、深紫灰卡片、紫色控件与浅紫高光/光晕；设备自动重连使用绿色开关，成功/警告/错误保留状态色。网页按当前浏览器站点记忆，桌面独立保存到%LOCALAPPDATA%/WiFiBridge/appearance.json；不写设备配置、不向局域网其他终端同步。启动前应用主题与窗口底色；保存失败时本次外观仍可使用并显示提示。

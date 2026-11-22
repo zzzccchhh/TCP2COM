@@ -12,7 +12,7 @@ import time
 from urllib.parse import urlsplit, unquote
 
 from web_service import WebService
-from lan_preferences import DEFAULT_PATH, Preferences, startup_settings
+from lan_preferences import DEFAULT_PATH, ONLINE_URL, Preferences, startup_settings
 
 BASE = Path(__file__).resolve().parent
 METHODS = frozenset("initial ports poll update_settings bridge usb network_log remember_draft read_device preview_save save_device import_config backup_config clear_logs export_logs reset_click peers revoke".split())
@@ -315,7 +315,7 @@ def main():
     parser.add_argument("--headless", action="store_true", help="只运行服务，不显示管理窗口")
     args = parser.parse_args()
     if not (BASE / "frontend" / "dist" / "index.html").is_file():
-        raise ValueError("本地网页尚未构建。请在 frontend 目录运行 npm ci 和 npm run build，再启动局域网服务。")
+        raise ValueError("本地网页尚未安装。请运行“启动_局域网服务.bat”或执行 py -3 -B -X utf8 tools/install-frontend.py。")
     preferences = Preferences(DEFAULT_PATH)
     startup_warning = preferences.warning
     settings = startup_settings(preferences.data, args.listen, args.port, args.origin)
@@ -338,7 +338,7 @@ def main():
         print(warning, flush=True)
     for address in addresses:
         print(f"{address.name}：{address.url(server.server_port)}", flush=True)
-    print("在线工作台：https://zzzccchhh.github.io/TCP2COM/\n使用服务管理窗口的打开网页、复制网址或二维码即可自动连接。", flush=True)
+    print(f"在线工作台：{ONLINE_URL}\n使用服务管理窗口的打开网页、复制网址或二维码即可自动连接。", flush=True)
     try:
         if args.headless:
             server.serve_forever()

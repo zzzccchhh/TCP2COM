@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 from urllib.parse import urlsplit
 
+ONLINE_URL = "https://zzzccchhh.github.io/TCP2COM-FRONT/"
 DEFAULT_PATH = Path(__file__).resolve().parent / "lan_service_state.json"
 DEFAULTS = {"version": 1, "listen": "0.0.0.0", "port": 8765,
             "origins": ["https://zzzccchhh.github.io"], "preferred_interface": {}}

@@ -109,7 +109,7 @@ def _runtime():
 def _launch(args):
     entry = BASE / "frontend" / "dist" / "index.html"
     if not entry.is_file():
-        raise StartupError("前端尚未构建。请运行程序目录中的“启动_新版界面.bat”完成首次构建，\n"
+        raise StartupError("前端尚未安装。请运行程序目录中的“启动_新版界面.bat”完成首次安装，\n"
                            "然后双击“启动_新版界面.vbs”。")
     webview = _runtime()
     from web_service import WebService

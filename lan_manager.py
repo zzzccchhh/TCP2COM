@@ -10,9 +10,7 @@ from urllib.parse import urlencode
 import webbrowser
 
 from lan_network import discover_addresses, choose_address
-from lan_preferences import Preferences
-
-ONLINE_URL = "https://zzzccchhh.github.io/TCP2COM/"
+from lan_preferences import ONLINE_URL, Preferences
 
 
 def pairing_link(address, invite="", online=True):

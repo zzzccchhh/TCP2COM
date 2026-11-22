@@ -2,7 +2,7 @@
 
 Python 网络到串口桥接工具，支持 TCP 客户端、TCP 服务端、固定对端 UDP、原生 USB / 独立 TCP 日志与设备配置。提供 React 桌面工作台、局域网多端页面、Tkinter 界面和命令行入口。
 
-[Gitee 仓库](https://gitee.com/zch_good/esp-tcp2com) · [GitHub 仓库](https://github.com/zzzccchhh/TCP2COM) · [在线工作台](https://zzzccchhh.github.io/TCP2COM/) · [配套 C5 固件](https://gitee.com/zch_good/esp-c5-wifi)
+[Gitee 仓库](https://gitee.com/zch_good/esp-tcp2com) · [GitHub 仓库](https://github.com/zzzccchhh/TCP2COM) · [在线工作台](https://zzzccchhh.github.io/TCP2COM-FRONT/) · [配套 C5 固件](https://gitee.com/zch_good/esp-c5-wifi)
 
 在线工作台运行界面；服务电脑上的 Python 后端负责实际网络、COM 和 USB 操作。手机浏览器控制的也是服务电脑，不直接占用手机串口。
 
@@ -33,7 +33,7 @@ C5 的 TCP／数据灯仍跟随业务链路；只接收网络日志不会触发�
 
 ## 安装与入口
 
-在仓库目录打开 PowerShell，使用 Python 3。桌面网页和局域网页面还需 Node.js/npm 构建前端。
+在仓库目录打开 PowerShell，使用 Python 3。桌面网页和局域网页面使用版本固定的前端安装包。首次运行对应的 BAT 启动器会自动安装，安装后可离线启动。
 
 ```powershell
 # CLI、Tkinter 与串口功能
@@ -45,15 +45,13 @@ py -3 -m pip install -r requirements-web.txt
 # 局域网多端服务及二维码
 py -3 -m pip install -r requirements-lan.txt
 
-cd frontend
-npm ci
-npm run build
-cd ..
+# 手动安装或更新桌面和局域网网页
+py -3 -B -X utf8 tools/install-frontend.py
 ```
 
-Windows 桌面界面需要 Microsoft Edge WebView2 Runtime。
+Windows 桌面界面需要 Microsoft Edge WebView2 Runtime。离线安装可下载 [前端 Release](https://github.com/zzzccchhh/TCP2COM-FRONT/releases) 中与安装器版本匹配的 ZIP，然后执行 `py -3 -B -X utf8 tools/install-frontend.py --archive tcp2com-frontend.zip`。
 
-新版工作台默认恢复原始暖灰、米白和灰绿色配色，并支持深色液态玻璃界面：桌面 Chromium / WebView2 使用背景折射，手机和窄屏的大面板使用毛玻璃，小型滑块在支持 SVG 背景滤镜的 Chromium 中保留折射；其他浏览器使用毛玻璃回退。日志文字和表单内容保持清晰，系统的“减少动态效果”设置会关闭按压缩放、跟随光效和过渡动画。效果代码基于 [Liquid Glass Web](https://github.com/xiaofangstudio/liquid-glass-web)，固定版本随前端打包，无需 CDN 或在线背景图；来源与适配说明见 [vendor/README.md](frontend/src/vendor/README.md)，发布包包含 `third-party-licenses.txt`。
+新版工作台默认恢复原始暖灰、米白和灰绿色配色，并支持深色液态玻璃界面：桌面 Chromium / WebView2 使用背景折射，手机和窄屏的大面板使用毛玻璃，小型滑块在支持 SVG 背景滤镜的 Chromium 中保留折射；其他浏览器使用毛玻璃回退。日志文字和表单内容保持清晰，系统的“减少动态效果”设置会关闭按压缩放、跟随光效和过渡动画。效果代码基于 [Liquid Glass Web](https://github.com/xiaofangstudio/liquid-glass-web)，固定版本随前端打包，无需 CDN 或在线背景图；来源与适配说明见 [vendor/README.md](https://github.com/zzzccchhh/TCP2COM-FRONT/blob/main/src/vendor/README.md)，第三方许可随构建交付。
 
 “当前设备”同一行左侧的“外观”可选择“原始浅色”“深色”或“跟随系统”。深色使用接近纯黑的页面底色（#08080a）、深紫灰卡片、柔紫色按钮和浅紫色玻璃高光/光晕；普通开关与选中态统一为紫色，设备自动重连使用绿色开关，连接成功、警告与错误保留各自状态色。首次使用默认原始浅色；只有选择跟随系统时才响应系统明暗变化。主题覆盖日志、图表、输入框、玻璃滑块、复选框以及选择菜单、配置/复位、确认和局域网窗口，切换时保留输入与连接状态。网页按当前浏览器站点保存偏好；桌面版独立保存到 `%LOCALAPPDATA%/WiFiBridge/appearance.json`，不写入设备配置，也不通过局域网同步给其他终端。页面在 React 加载前应用主题，桌面启动窗口底色同步匹配；存储不可用时本次仍可切换，并提示未能保存。
 
@@ -84,7 +82,7 @@ Windows 桌面界面需要 Microsoft Edge WebView2 Runtime。
 | 入口 | 用途 |
 |---|---|
 | `启动_新版界面.vbs` | 本机 React 桌面工作台，不显示控制台 |
-| `启动_新版界面.bat` | 首次构建或查看启动诊断 |
+| `启动_新版界面.bat` | 首次安装或查看启动诊断 |
 | `启动_局域网服务.vbs` | 启动服务管理窗口，生成电脑/手机连接链接 |
 | `启动_局域网服务.bat` | 查看服务启动诊断 |
 | `启动_图形界面.bat` | Tkinter 图形界面 |
@@ -212,7 +210,7 @@ JSON 仅在显式指定时读取，命令行覆盖 profile。profiles 配置电�
 py -3 -B -X utf8 lan_service.py --headless --listen 0.0.0.0 --port 8765
 ```
 
-开发预览在 `frontend` 执行 `npm run dev`。未接入后端时显示预览，不提供真实设备操作。连接本地 Vite 页面需在服务参数明确允许实际来源，例如 `--origin http://127.0.0.1:5173`。
+开发预览在 [独立前端仓库](https://github.com/zzzccchhh/TCP2COM-FRONT) 执行 `npm run dev`。未接入后端时显示预览，不提供真实设备操作。连接本地 Vite 页面需在服务参数明确允许实际来源，例如 `--origin http://127.0.0.1:5173`。
 
 ## 配置、草稿和密码
 
@@ -259,17 +257,19 @@ TCP 接收队列满时使用背压；串口短写保留后缀重试。状态分�
 # Python 回归
 py -3 -B -X utf8 -m unittest discover -s tests -v
 
-# 前端构建和浏览器回归
-cd frontend
-npm run build
+# 前端构建和浏览器回归（假设前端仓库已克隆到同级目录）
+Push-Location ../tcp2com-front
+npm ci
+npm run build:pages
+npm run test:pages
 npm test
-cd ..
+Pop-Location
 
 # 使用单独构建的 C5 生产 C 配置夹具进行 USB 客户端配对
 py -3 -B tools/test-firmware-config.py --device c5 --fixture D:/ESP/ESP-C5-WFI/build/host/usb_config_fixture.exe
 ```
 
-Windows 浏览器测试使用 Edge；其他平台需要 Playwright Chromium。`tools/test-webview.py` 可另外验证本地 WebView2 集成，默认使用隐藏测试窗口、临时设置和本机模拟连接，验证深色启动与浅色保存；加 `--appearance light` 验证浅色启动与深色保存。可选动效录像：在 `frontend` 中执行 `npx playwright install ffmpeg`，设置环境变量 `LIQUID_PREVIEW_DIR` 为本机输出目录，再运行 `npm test -- tests/liquid-elastic.spec.ts --grep "continuous bloom"`，可保存明暗主题的鼠标/触屏 WebM；普通回归不需要录像编码器。
+Windows 浏览器测试使用 Edge；其他平台需要 Playwright Chromium。`tools/test-webview.py` 可另外验证本地 WebView2 集成，默认使用隐藏测试窗口、临时设置和本机模拟连接，验证深色启动与浅色保存；加 `--appearance light` 验证浅色启动与深色保存。可选动效录像：在前端仓库中执行 `npx playwright install ffmpeg`，设置环境变量 `LIQUID_PREVIEW_DIR` 为本机输出目录，再运行 `npm test -- tests/liquid-elastic.spec.ts --grep "continuous bloom"`，可保存明暗主题的鼠标/触屏 WebM；普通回归不需要录像编码器。
 
 软件验证记录（2026-11-02）：Python 245 项，238 项通过、7 项按环境跳过；前端生产构建和 26 项浏览器回归通过；上位机与 C5 生产 C 配置夹具配对通过，包含接口 0/3/4、网络角色和保存应答丢失不重放。
 
@@ -315,7 +315,7 @@ Windows 浏览器测试使用 Edge；其他平台需要 Playwright Chromium。`t
 
 测试覆盖旧 SPI 备份的 8081 端口与未生效复位选择，S3 仅 2.4 GHz 和原接口回归。主机替身、回环和浏览器检查不代表真实 ESP/USB、MCU 停发、SPI 时序、手机网络或持续无线吞吐已验收。本轮没有烧录或改动车端工程。
 
-GitHub `main` 的推送触发 [Pages 工作流](.github/workflows/pages.yml)，构建并发布 `frontend/dist`。线上页面只更新前端，服务电脑仍需更新本仓库 Python 文件和本地前端构建，并重启服务。
+在线工作台由 [TCP2COM-FRONT](https://github.com/zzzccchhh/TCP2COM-FRONT) 发布为单个 `index.html`。原 `/TCP2COM/` 地址跳转到新工作台并保留邀请参数。服务电脑仍通过本仓库更新 Python 后端和本地前端安装包。
 
 远程复位二级页保留当前设备已填地址、端口和滚动位置，切换设备后使用相应默认值；进入、返回、外观变化不发送复位请求，不额外改变五连击计数，进行中的任务状态持续显示。
 
@@ -325,7 +325,7 @@ GitHub `main` 的推送触发 [Pages 工作流](.github/workflows/pages.yml)，�
 |---|---|
 | `tcp2com.py`、`network_transport.py` | CLI、TCP/UDP 与 COM 桥接 |
 | `tcp2com_gui.py` | Tkinter 界面 |
-| `tcp2com_web.py`、`web_service.py`、`frontend/` | 本机 React/WebView2 工作台 |
+| `tcp2com_web.py`、`web_service.py`、`frontend/dist/` | 本机 React/WebView2 工作台和本地安装产物 |
 | `lan_service.py`、`lan_manager.py`、`lan_network.py` | 局域网多端后端、管理窗口和网卡地址 |
 | `c5_config.py`、`c5_usb_config.py` | C5/S3 HTTP/USB 配置、草稿校验和保存 |
 | `usb_diagnostics.py`、`network_log.py`、`reset_control.py` | USB / TCP 日志诊断与独立复位控制 |
